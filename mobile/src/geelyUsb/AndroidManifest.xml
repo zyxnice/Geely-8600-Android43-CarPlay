@@ -6,5 +6,9 @@
         <meta-data
             android:name="com.shilapi.xcertplay.GEELY_USB_BYPASS"
             android:value="true" />
+        <!-- Observation only: no OEM navigation broadcast or vehicle sender is included. -->
+        <meta-data
+            android:name="com.shilapi.xcertplay.GEELY_NAVIGATION_OBSERVE"
+            android:value="true" />
     </application>
 </manifest>

@@ -20,7 +20,7 @@ $badging = $badgingLines -join "`n"
 if ($badging -notmatch "package: name='com\.shihab\.diplay\.repair1\.geely8600'") {
     throw 'Unexpected application ID; this test must coexist with the original application'
 }
-if ($badging -notmatch "versionName='[^']*H53-USB1'" -or
+if ($badging -notmatch "versionName='[^']*H53-USB1(?:-NAVOBS1)?'" -or
     $badging -notmatch "(?m)^(?:minSdkVersion|sdkVersion):'18'$" -or
     $badging -notmatch "native-code:.*'armeabi-v7a'") {
     throw 'APK version, API-18 minimum or ARMv7 support is incorrect'

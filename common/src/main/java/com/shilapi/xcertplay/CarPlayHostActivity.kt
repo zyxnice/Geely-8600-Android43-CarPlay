@@ -70,6 +70,7 @@ import com.shilapi.xcertplay.media.AndroidMediaSink
 import com.shilapi.xcertplay.media.CarPlayTouchMapper
 import com.shilapi.xcertplay.media.CarPlayVideoLayout
 import com.shilapi.xcertplay.network.CarPlayVpnService
+import com.shilapi.xcertplay.compat.GeelyVpnConsentRecovery
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.orchestration.CarPlayRuntimeConfig
 import com.shilapi.xcertplay.orchestration.CarPlayStatus
@@ -177,9 +178,17 @@ class CarPlayHostActivity : ComponentActivity() {
         registerForActivityResult(ActivityResultContracts.StartActivityForResult()) { result ->
             awaitingVpnConsent = false
             if (result.resultCode == RESULT_OK) {
-                vpnReady = true
-                maybeStartCarPlay()
+                vpnReady = CarPlayVpnService.prepare(this) == null
+                if (vpnReady) {
+                    GeelyVpnConsentRecovery.recordGranted(this)
+                    maybeStartCarPlay()
+                } else {
+                    GeelyVpnConsentRecovery.recordDenied(this)
+                    setStatus(getString(R.string.vpn_consent_was_denied))
+                }
             } else {
+                vpnReady = false
+                GeelyVpnConsentRecovery.recordDenied(this)
                 setStatus(getString(R.string.vpn_consent_was_denied))
             }
         }
@@ -358,6 +367,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var manualHotspotChannel = 0
     private var manualHotspotSecurity = ManualHotspotSecurity.OPEN
     private var awaitingVpnConsent = false
+    private var vpnConsentRecovery: GeelyVpnConsentRecovery? = null
     private var awaitingWirelessPermissions = false
     private var awaitingLocationPermission = false
     private var vpnReady = false
@@ -590,11 +600,43 @@ class CarPlayHostActivity : ComponentActivity() {
             PackageManager.PERMISSION_GRANTED
 
     private fun requestVpnConsent() {
+        if (awaitingVpnConsent) return
         val consent = CarPlayVpnService.prepare(this)
         if (consent == null) {
             vpnReady = true
+            GeelyVpnConsentRecovery.recordGranted(this)
             maybeStartCarPlay()
+        } else if (GeelyVpnConsentRecovery.shouldRestore(this)) {
+            awaitingVpnConsent = true
+            val recovery = GeelyVpnConsentRecovery(applicationContext)
+            vpnConsentRecovery = recovery
+            appendLog("Restoring previously confirmed VPN trust after system boot")
+            Thread({
+                val restored = recovery.restore()
+                mainHandler.post {
+                    if (hostUiDestroyed || shuttingDown.get()) return@post
+                    awaitingVpnConsent = false
+                    vpnConsentRecovery = null
+                    if (!wirelessEnabled) {
+                        appendLog("VPN recovery confirmed=$restored; checking current system permission")
+                        // Recheck the system, but never recursively start a failed restore attempt.
+                        // A timed-out OEM call may already have committed: only the current system
+                        // permission decides readiness; do not revoke a granted VPN to force a dialog.
+                        val currentConsent = CarPlayVpnService.prepare(this)
+                        if (currentConsent == null) {
+                            vpnReady = true
+                            GeelyVpnConsentRecovery.recordGranted(this)
+                            maybeStartCarPlay()
+                        } else {
+                            vpnReady = false
+                            awaitingVpnConsent = true
+                            vpnConsent.launch(currentConsent)
+                        }
+                    }
+                }
+            }, "geely-vpn-consent").apply { isDaemon = true; start() }
         } else {
+            vpnReady = false
             awaitingVpnConsent = true
             vpnConsent.launch(consent)
         }
@@ -1005,6 +1047,7 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        vpnConsentRecovery?.stop()
         clusterMonitor?.stop()
         mainHandler.removeCallbacks(hideIdleCenterMap)
         homeMonitor?.stop()

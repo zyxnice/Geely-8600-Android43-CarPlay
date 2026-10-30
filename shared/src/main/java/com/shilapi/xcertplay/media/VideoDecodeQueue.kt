@@ -116,6 +116,33 @@ internal class VideoDecodeQueue(
         }
     }
 
+    /** Selected IDR is removed too; the sole decoder consumer must feed it before polling again. */
+    data class CatchUp(val frame: VideoJob.Frame, val discarded: Int)
+
+    /**
+     * Skip only a contiguous frame prefix ending at a fresh H264 IDR. Never cross an ordered
+     * control or retain dependent pictures from before that IDR. Caller is the sole consumer;
+     * the monitor excludes producers and close while selecting/removing the prefix.
+     */
+    @Synchronized fun takeFreshH264KeyFrame(nowNs: Long, maxAgeNs: Long): CatchUp? {
+        if (closed) return null
+        var selected: VideoJob.Frame? = null
+        var prefixSize = 0
+        var selectedSize = 0
+        for (job in jobs) {
+            if (job !is VideoJob.Frame) break
+            prefixSize++
+            val ageNs = nowNs - job.receivedNs
+            if (ageNs in 0..maxAgeNs && MediaCodecSupport.isH264KeyFrame(job.nalus)) {
+                selected = job
+                selectedSize = prefixSize
+            }
+        }
+        val frame = selected ?: return null
+        repeat(selectedSize) { jobs.poll() }
+        return CatchUp(frame, selectedSize - 1)
+    }
+
     fun poll(timeoutMillis: Long): VideoJob? = jobs.poll(timeoutMillis, TimeUnit.MILLISECONDS)
 
     /** Releases retained buffers and makes any late producer callback harmless after shutdown. */

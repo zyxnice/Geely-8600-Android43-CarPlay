@@ -7,6 +7,7 @@ internal class VideoPipelineStats(
 ) {
     enum class Stage {
         QUEUE_AGE, INPUT_WAIT, INPUT_COPY, INPUT_SUBMIT, OUTPUT_POLL, CODEC_AGE, OUTPUT_RELEASE,
+        RECEIVE_TO_SUBMIT, SUBMIT_INTERVAL,
     }
     private val counts = LongArray(Stage.entries.size)
     private val totals = LongArray(Stage.entries.size)
@@ -15,6 +16,32 @@ internal class VideoPipelineStats(
     private var decoded = 0L
     private var rendered = 0L
     private var superseded = 0L
+    // Bounded metadata only; codec may omit outputs. Never retain access-unit payloads here.
+    private val receivedByPts = LinkedHashMap<Long, Long>()
+    private var lastSubmitNs: Long? = null
+
+    fun input(presentationTimeUs: Long, receivedNs: Long) {
+        receivedByPts[presentationTimeUs] = receivedNs
+        if (receivedByPts.size > 128) {
+            val iterator = receivedByPts.entries.iterator()
+            iterator.next()
+            iterator.remove()
+        }
+    }
+
+    /** Successful release to Surface, not physical presentation or end-to-end touch latency. */
+    fun released(presentationTimeUs: Long, render: Boolean, submittedNs: Long) {
+        val receivedNs = receivedByPts.remove(presentationTimeUs)
+        if (!render) return
+        if (receivedNs != null) record(Stage.RECEIVE_TO_SUBMIT, submittedNs - receivedNs)
+        lastSubmitNs?.let { record(Stage.SUBMIT_INTERVAL, submittedNs - it) }
+        lastSubmitNs = submittedNs
+    }
+
+    fun decoderChanged() {
+        receivedByPts.clear()
+        lastSubmitNs = null
+    }
 
     fun record(stage: Stage, elapsedNs: Long) {
         if (elapsedNs < 0) return

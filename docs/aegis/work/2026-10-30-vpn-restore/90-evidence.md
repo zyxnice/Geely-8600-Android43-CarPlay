@@ -8,6 +8,7 @@
 - 新增GeelyVpnConsentPolicyTest10项、GeelyVpnConsentLeaseTest3项全部通过。
 - 模拟器emulator-5580为通用Android4.3.1 ARM，并非原厂车机固件。独立VpnApi18Probe调用生产helper方法实际输出：PROBE_OK:restored:uid=1000；already_prepared:uid=1000；vpn_expired；vpn_cancelled；reset_to_boot_default。probe仅存在analysis目录，不打入APK。
 - 独立复审vpn_review：原活动内建VPN接管问题已修复并补测；取消/超时与已发出Binder不能撤回的区别已落实至代码和ADR；未发现阻塞本地候选交付的新增确定问题。
+- emulator-ui/verification.md及每版XML/截图/logcat：独立agent逐包同签覆盖成功，从正常USB入口验证首次系统确认、取消拒绝和再次确认，平台不符不走恢复，窗口无启动崩溃。模拟器在验证后关闭。
 - git diff --check通过。原main媒体脏改动不提交、不覆盖；用户暂存区不变。未连接车机、未发布或推送。
 
 限制：原厂桥到助手完整调用、真实冷启动免弹窗、真实CarPlay连接及用户感受未验。legacy内建VPN同时启动有平台接口竞态；应用未观察的撤销紧接重启无法由旧信任标记可靠区分。

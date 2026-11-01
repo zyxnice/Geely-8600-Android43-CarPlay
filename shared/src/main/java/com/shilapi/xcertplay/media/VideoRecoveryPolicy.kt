@@ -8,6 +8,7 @@ package com.shilapi.xcertplay.media
 internal class VideoRecoveryPolicy(
     private val enabled: Boolean,
     private val outputTimeoutNs: Long = 1_000_000_000L,
+    private val monitorProgress: Boolean = false,
 ) {
     enum class Action { REBUILD, KEEP_DECODER, ALREADY_WAITING }
 
@@ -17,8 +18,41 @@ internal class VideoRecoveryPolicy(
     private var keyFramePtsUs: Long? = null
     private var keyFrameQueuedNs: Long? = null
     private var minimumOutputPtsUs: Long? = null
+    private var pendingInputSinceNs: Long? = null
+    private var pendingInputs = 0
+    private var rejectedSinceNs: Long? = null
 
-    /** The caller classifies only queue/age discontinuities as a recoverable reference gap. */
+    /** B-output2: only accepted codec input is evidence of decoder work, not socket receipt. */
+    fun onInputQueued(nowNs: Long) {
+        rejectedSinceNs = null
+        if (pendingInputSinceNs == null) pendingInputSinceNs = nowNs
+        pendingInputs++
+    }
+
+    /** Require both sustained input and elapsed time; static scenes cannot trigger this watchdog. */
+    fun consumeOutputStall(nowNs: Long): Boolean {
+        val since = pendingInputSinceNs ?: return false
+        if (!monitorProgress || recovering || pendingInputs < 30 || nowNs - since < 1_500_000_000L) return false
+        clearInputProgress()
+        return true
+    }
+
+    /** Missing random-access input is a sender/reference-chain wait, never proof of codec failure. */
+    fun reportKeyFrameWaitIfDue(nowNs: Long): Boolean {
+        if (!monitorProgress) return false
+        val since = rejectedSinceNs
+        if (since == null) { rejectedSinceNs = nowNs; return false }
+        if (nowNs - since < 5_000_000_000L) return false
+        rejectedSinceNs = nowNs
+        return true
+    }
+
+    private fun clearInputProgress() {
+        pendingInputSinceNs = null
+        pendingInputs = 0
+    }
+
+    /** Queue/age gaps and B's accepted-input stall probe may try a fresh IDR on a healthy codec. */
     fun begin(referenceGap: Boolean, decoderAvailable: Boolean): Action {
         if (!enabled || disabledForSession || !referenceGap || !decoderAvailable || !hasRenderedOutput) {
             if (recovering && (!referenceGap || !decoderAvailable)) disabledForSession = true
@@ -31,6 +65,7 @@ internal class VideoRecoveryPolicy(
             return Action.ALREADY_WAITING
         }
         recovering = true
+        clearInputProgress()
         keyFramePtsUs = null
         keyFrameQueuedNs = null
         return Action.KEEP_DECODER
@@ -51,6 +86,8 @@ internal class VideoRecoveryPolicy(
     }
 
     fun onRendered() {
+        clearInputProgress()
+        rejectedSinceNs = null
         hasRenderedOutput = true
         recovering = false
         keyFramePtsUs = null
@@ -71,6 +108,8 @@ internal class VideoRecoveryPolicy(
 
     /** A new codec/format/surface needs its own first output; a failed strategy stays disabled. */
     fun onDecoderChanged() {
+        clearInputProgress()
+        rejectedSinceNs = null
         hasRenderedOutput = false
         recovering = false
         keyFramePtsUs = null

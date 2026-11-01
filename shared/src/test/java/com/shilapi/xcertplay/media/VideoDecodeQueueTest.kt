@@ -6,6 +6,91 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VideoDecodeQueueTest {
+    @Test fun queueSnapshotExcludesControlsAndRetiredFrames() {
+        val queue = VideoDecodeQueue()
+        queue.offer(VideoJob.Config(VideoCodec.H264, ByteArray(20)))
+        queue.offer(VideoJob.Frame(ByteArray(3), 10))
+        queue.offer(VideoJob.SurfaceChanged(null))
+        queue.offer(VideoJob.Frame(ByteArray(4), 30))
+        assertEquals(VideoDecodeQueue.Snapshot(2, 7, 40), queue.snapshot(50))
+        queue.poll(0)
+        queue.poll(0)
+        assertEquals(VideoDecodeQueue.Snapshot(1, 4, 20), queue.snapshot(50))
+        queue.close()
+        assertEquals(VideoDecodeQueue.Snapshot(0, 0, 0), queue.snapshot(50))
+    }
+    private fun h264Frame(idr: Boolean, receivedNs: Long) = VideoJob.Frame(
+        byteArrayOf(0, 0, 0, 1, if (idr) 0x65 else 0x41, 1), receivedNs)
+
+    @Test fun queuedKeyframeInspectionValidatesLengthPrefixedAccessUnitsWithoutConversion() {
+        val valid = byteArrayOf(0, 0, 0, 2, 0x67, 1, 0, 0, 0, 2, 0x65, 1)
+        assertTrue(MediaCodecSupport.isH264KeyFrame(valid))
+        assertTrue(MediaCodecSupport.isH264KeyFrame(h264Frame(true, 0).nalus))
+        assertFalse(MediaCodecSupport.isH264KeyFrame(h264Frame(false, 0).nalus))
+        assertFalse(MediaCodecSupport.isH264KeyFrame(valid + byteArrayOf(0)))
+        assertFalse(MediaCodecSupport.isH264KeyFrame(byteArrayOf(0, 0, 0, 8, 0x65)))
+        assertFalse(MediaCodecSupport.isH264KeyFrame(ByteArray(0)))
+    }
+
+    @Test fun catchUpSelectsLatestFreshIdrAndKeepsItsDependents() {
+        val queue = VideoDecodeQueue()
+        queue.offer(h264Frame(false, 1))
+        queue.offer(h264Frame(true, 80))
+        queue.offer(h264Frame(false, 85))
+        val latest = h264Frame(true, 90)
+        val dependent = h264Frame(false, 95)
+        queue.offer(latest)
+        queue.offer(dependent)
+        val result = queue.takeFreshH264KeyFrame(100, 25)!!
+        assertSame(latest, result.frame)
+        assertEquals(3, result.discarded)
+        assertSame(dependent, queue.poll(0))
+        assertNull(queue.poll(0))
+    }
+
+    @Test fun catchUpNeverCrossesConfigSurfaceOrResync() {
+        val controls = listOf(VideoJob.Config(VideoCodec.H264, byteArrayOf(1)),
+            VideoJob.SurfaceChanged(null), VideoJob.Resync())
+        for (control in controls) {
+            val queue = VideoDecodeQueue()
+            queue.offer(control)
+            val idr = h264Frame(true, 90)
+            queue.offer(idr)
+            assertNull(queue.takeFreshH264KeyFrame(100, 25))
+            assertSame(control, queue.poll(0))
+            assertSame(idr, queue.poll(0))
+        }
+    }
+
+    @Test fun noFreshIdrLeavesQueueUntouchedAndClosePreventsCatchUp() {
+        val queue = VideoDecodeQueue()
+        val oldIdr = h264Frame(true, 1)
+        val dependent = h264Frame(false, 95)
+        queue.offer(oldIdr)
+        queue.offer(dependent)
+        assertNull(queue.takeFreshH264KeyFrame(100, 25))
+        assertSame(oldIdr, queue.poll(0))
+        assertSame(dependent, queue.poll(0))
+        queue.offer(h264Frame(true, 90))
+        queue.close()
+        queue.offer(h264Frame(true, 95))
+        assertNull(queue.takeFreshH264KeyFrame(100, 25))
+        assertNull(queue.poll(0))
+    }
+
+    @Test fun catchUpKeepsOrderedControlAfterSelectedIdr() {
+        val queue = VideoDecodeQueue()
+        val firstIdr = h264Frame(true, 90)
+        val config = VideoJob.Config(VideoCodec.H264, byteArrayOf(1))
+        queue.offer(firstIdr)
+        queue.offer(config)
+        val laterIdr = h264Frame(true, 95)
+        queue.offer(laterIdr)
+        assertSame(firstIdr, queue.takeFreshH264KeyFrame(100, 25)!!.frame)
+        assertSame(config, queue.poll(0))
+        assertSame(laterIdr, queue.poll(0))
+    }
+
     @Test fun lostReferenceChainWaitsForSuccessfullyQueuedKeyframe() {
         val chain = VideoReferenceChain()
         val predicted = byteArrayOf(0, 0, 0, 1, 0x41, 1)

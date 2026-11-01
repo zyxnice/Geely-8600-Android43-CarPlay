@@ -12,9 +12,26 @@ class StreamReceiveStatsTest {
         stats.decrypted(40_000)
         clock = 5_000_000_000L
         stats.flush()
-        assertTrue(lines.single().contains("decryptCount=2 decryptAvgUs=30 decryptMaxUs=40"))
+        assertTrue(lines.first().contains("decryptCount=2 decryptAvgUs=30 decryptMaxUs=40"))
         stats.flush(true)
-        assertTrue(lines.last().contains("decryptCount=0 decryptAvgUs=0 decryptMaxUs=0"))
+        assertTrue(lines.last { it.startsWith("Receive:") }.contains("decryptCount=0 decryptAvgUs=0 decryptMaxUs=0"))
+    }
+
+    @Test fun videoCadenceCountsOnlyFramesAtReadCompletionBeforeDecrypt() {
+        var clock = 0L
+        val lines = mutableListOf<String>()
+        val stats = StreamReceiveStats("video", lines::add) { clock }
+        stats.reading()
+        clock = 100_000_000
+        stats.received(200)
+        stats.videoFrameReceived()
+        clock = 1_200_000_000
+        stats.decrypted(1_100_000_000)
+        stats.processed()
+        stats.received(128) // Config/heartbeat is a message, not a frame.
+        clock = 5_000_000_000
+        stats.flush()
+        assertTrue(lines.last().contains("frames=1 windowMs=5000 perSec=[1,0,0,0,0] late=0"))
     }
 
     @Test fun separatesSocketWaitFromLocalProcessingAndTracksSequenceWrap() {

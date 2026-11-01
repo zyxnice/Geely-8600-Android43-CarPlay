@@ -108,6 +108,7 @@ class IphoneUsbHost(
     fun discover(): List<UsbDevice> =
         deviceAccess.discover(usbManager.deviceList.values.toList())
             .filter { matcher.matches(it.vendorId, it.productId) }
+            .also { runtimeRecovery.observedDiscovery(it.isNotEmpty()) }
 
     fun supportsKernelDiscovery(): Boolean = GeelyUsbDeviceAccess.isEnabled(appContext)
     fun usesOemBridge(device: UsbDevice): Boolean = deviceAccess.isRecovered(device)

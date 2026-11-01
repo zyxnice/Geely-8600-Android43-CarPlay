@@ -28,16 +28,32 @@ final class GeelyUsbOemBridge {
         execute(command);
     }
 
-    String prepareRuntime(File helperDex, File runtimeDirectory, long deadline, File lease, String nonce) throws IOException {
+    String prepareRuntime(File helperDex, File runtimeDirectory, long deadline, File lease, String nonce,
+            boolean recoverEnumeration) throws IOException {
         if (!lease.getCanonicalFile().getParentFile().equals(helperDex.getCanonicalFile().getParentFile())
                 || !nonce.matches("[a-f0-9]{32}") || !lease.getName().equals("runtime-" + nonce + ".lease"))
             throw new IOException("runtime_lease_path");
         String result = execute(buildHelperCommand(helperDex, runtimeDirectory,
-                GeelyUsbRuntimeHelper.ENTRY_POINT, new String[] {Long.toString(deadline), lease.getCanonicalPath(), nonce}));
-        java.util.regex.Matcher ok = java.util.regex.Pattern.compile("GEELY_RUNTIME_OK:(ready|prepared|active-preserved)").matcher(result);
+                GeelyUsbRuntimeHelper.ENTRY_POINT, new String[] {Long.toString(deadline), lease.getCanonicalPath(), nonce,
+                        recoverEnumeration ? "recover-enumeration" : "prepare"}));
+        java.util.regex.Matcher ok = java.util.regex.Pattern.compile(
+                "GEELY_RUNTIME_OK:(ready|prepared|active-preserved|device-preserved|not-ready|enumeration-restarted)").matcher(result);
         if (ok.find()) return ok.group(1);
         java.util.regex.Matcher failure = java.util.regex.Pattern.compile("GEELY_RUNTIME_FAILED:([a-z_]{1,64})").matcher(result);
         throw new IOException(failure.find() ? failure.group(1) : "runtime_no_verified_response");
+    }
+
+    /** Fixed VPN protocol: no caller-selected package, UID, shell command, or service name. */
+    String restoreVpn(File helperDex, File runtimeDirectory, long deadline, File lease, String nonce, String boot) throws IOException {
+        if (!lease.getCanonicalFile().getParentFile().equals(helperDex.getCanonicalFile().getParentFile())
+                || !nonce.matches("[a-f0-9]{32}") || !lease.getName().equals("vpn-" + nonce + ".lease")
+                || !GeelyVpnConsentPolicy.validBootId(boot)) throw new IOException("vpn_lease_path");
+        String result = execute(buildHelperCommand(helperDex, runtimeDirectory, GeelyVpnConsentHelper.ENTRY_POINT,
+                new String[] {Long.toString(deadline), lease.getCanonicalPath(), nonce, boot}));
+        java.util.regex.Matcher ok = java.util.regex.Pattern.compile("GEELY_VPN_OK:(restored|already_prepared)").matcher(result);
+        if (ok.find()) return ok.group(1);
+        java.util.regex.Matcher failure = java.util.regex.Pattern.compile("GEELY_VPN_FAILED:([a-z_]{1,64})").matcher(result);
+        throw new IOException(failure.find() ? failure.group(1) : "vpn_no_verified_response");
     }
 
     private String execute(String command) throws IOException {

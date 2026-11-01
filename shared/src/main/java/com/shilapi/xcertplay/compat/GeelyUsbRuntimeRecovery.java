@@ -23,6 +23,7 @@ public final class GeelyUsbRuntimeRecovery {
     private volatile boolean stopped;
     private volatile File activeLease;
     private String summary = "not-run";
+    private final GeelyUsbRuntimePolicy.EnumerationWait enumerationWait = new GeelyUsbRuntimePolicy.EnumerationWait();
 
     public GeelyUsbRuntimeRecovery(Context context) { this.context = context.getApplicationContext(); }
 
@@ -45,6 +46,11 @@ public final class GeelyUsbRuntimeRecovery {
     }
     public synchronized String summary() { return summary; }
 
+    /** Records discovery on the USB worker; only initial discovery can act on this timer. */
+    public synchronized void observedDiscovery(boolean applePresent) {
+        enumerationWait.observed(applePresent, SystemClock.elapsedRealtime());
+    }
+
     /** Returns false during the bounded settle interval; the controller keeps its normal discovery poll. */
     public synchronized boolean prepare() throws IOException {
         if (stopped || Thread.currentThread().isInterrupted()) throw new IOException("runtime_cancelled");
@@ -55,9 +61,13 @@ public final class GeelyUsbRuntimeRecovery {
         if (operationPending()) { summary = "waiting-for-previous-operation"; return false; }
         long now = SystemClock.elapsedRealtime();
         // Poll locally first, avoiding privileged helper launches in the steady waiting state.
-        if (locallyReady()) { summary = "ready"; return true; }
-        if (now - lastAttempt < 5000) return false;
-        if (changes >= 3) throw new IOException("USB模式被系统反复切回，请保存连接日志后重试");
+        boolean ready = locallyReady();
+        if (!ready) enumerationWait.resetWaiting();
+        // The mode-repair cooldown must not extend the independent empty-discovery wait.
+        if (!ready && now - lastAttempt < 5000) return false;
+        final boolean recoverEnumeration = ready && enumerationWait.claimRecovery(now);
+        if (ready && !recoverEnumeration) { summary = "ready"; return true; }
+        if (!recoverEnumeration && changes >= 3) throw new IOException("USB模式被系统反复切回，请保存连接日志后重试");
         lastAttempt = now;
         final File dex = new GeelyUsbFdBroker(context).prepareHelper();
         final String nonce = java.util.UUID.randomUUID().toString().replace("-", "");
@@ -73,7 +83,8 @@ public final class GeelyUsbRuntimeRecovery {
             task = new FutureTask<String>(new java.util.concurrent.Callable<String>() {
                 @Override public String call() throws Exception {
                     if (stopped) throw new IOException("runtime_cancelled");
-                    return new GeelyUsbOemBridge().prepareRuntime(dex, new File(dex.getParentFile(), "runtime"), deadline, lease, nonce);
+                    return new GeelyUsbOemBridge().prepareRuntime(dex, new File(dex.getParentFile(), "runtime"),
+                            deadline, lease, nonce, recoverEnumeration);
                 }
             });
             inFlight = task;
@@ -84,7 +95,8 @@ public final class GeelyUsbRuntimeRecovery {
         try {
             summary = task.get(8, TimeUnit.SECONDS);
             if ("prepared".equals(summary)) changes++;
-            Log.i(TAG, "8600 runtime preparation result=" + summary + " changes=" + changes);
+            Log.i(TAG, "8600 runtime preparation result=" + summary + " changes=" + changes
+                    + " enumerationRecovery=" + recoverEnumeration);
             return true;
         } catch (Exception failure) {
             if (failure instanceof InterruptedException) Thread.currentThread().interrupt();

@@ -27,6 +27,10 @@ internal class StreamReceiveStats(
     private var decryptCount = 0L
     private var decryptNs = 0L
     private var decryptMaxNs = 0L
+    private val frameCadence = FrameCadenceStats(windowStart)
+
+    /** Only complete video messages count; excludes config/heartbeat packets and decryption time. */
+    fun videoFrameReceived() { frameCadence.frame(processingStart) }
 
     /** Pure decrypt-call duration, including failed authentication; excludes downstream callbacks. */
     fun decrypted(elapsedNs: Long) {
@@ -80,6 +84,10 @@ internal class StreamReceiveStats(
             "seqGapLast=[$lastSequenceGap] seqGapAtMs=$lastSequenceGapAtMs ended=$ended " +
             "decryptCount=$decryptCount decryptAvgUs=${if (decryptCount == 0L) 0 else decryptNs / decryptCount / 1000} " +
             "decryptMaxUs=${decryptMaxNs / 1000} cryptoCumulative=${cryptoDetails()}") }
+        if (label == "video" || label == "video-read") {
+            val cadence = frameCadence.reportAndReset(now)
+            runCatching { report("Cadence: $label $cadence ended=$ended") }
+        }
         windowStart = now
         packets = 0
         bytes = 0

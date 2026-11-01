@@ -3,24 +3,52 @@ package com.shilapi.xcertplay.hud
 import android.content.Context
 import android.os.Build
 
-/** Process-local consent only; neither an APK update nor an ignition restart restores output. */
+/** Persistent user preference, separate from the current controller's revocable output lease. */
 object GeelyHudTrialSettings {
     private val lease = GeelyHudTrialLease()
     @Volatile private var currentStatus = GeelyHudTrialStatus.OFF
+    private var initialized = false
+    private var requestedEnabled = true
+    private var factoryIdleConfirmed = false
 
     fun available(context: Context): Boolean =
         context.packageName == "com.shihab.diplay.repair1.geely8600" &&
             Build.VERSION.SDK_INT == 18 && Build.BOARD == "C3ALFUS" &&
             Build.DISPLAY == "06.03.08600.H53.00060" && GeelyNavigationObservation.isEnabled(context)
 
-    fun enabled(context: Context): Boolean = available(context) && lease.enabled()
+    @Synchronized fun enabled(context: Context): Boolean {
+        initialize(context)
+        return available(context) && requestedEnabled
+    }
 
-    /** Caller obtains explicit trial consent first; the output owner verifies the OEM before sending. */
+    private fun initialize(context: Context) {
+        if (initialized) return
+        requestedEnabled = GeelyHudPreferences.enabled(context)
+        lease.request(requestedEnabled && available(context))
+        currentStatus = if (requestedEnabled && available(context)) GeelyHudTrialStatus.WAITING else GeelyHudTrialStatus.OFF
+        initialized = true
+    }
+
+    /** Save manual OFF as well as ON; runtime failures must not change this user preference. */
     @Synchronized fun setEnabled(context: Context, enabled: Boolean) {
+        initialize(context)
         val requested = enabled && available(context)
+        requestedEnabled = requested
+        GeelyHudPreferences.setEnabled(context, requested)
         lease.request(requested)
         currentStatus = if (requested) GeelyHudTrialStatus.WAITING else GeelyHudTrialStatus.OFF
     }
+
+    /** Explicit assurance is only for this owner; ACTIVE evidence always takes precedence. */
+    @Synchronized fun confirmFactoryIdle(context: Context) {
+        initialize(context)
+        if (available(context) && requestedEnabled && currentStatus == GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN) {
+            factoryIdleConfirmed = true
+            currentStatus = GeelyHudTrialStatus.WAITING
+        }
+    }
+
+    @Synchronized internal fun factoryIdleConfirmed(token: Any): Boolean = lease.owns(token) && factoryIdleConfirmed
 
     fun status(): GeelyHudTrialStatus = currentStatus
 
@@ -28,21 +56,44 @@ object GeelyHudTrialSettings {
         if (!lease.owns(token)) return
         // A Binder send may return after the user switched off. Keep OFF authoritative;
         // errors remain visible because they can require physical HUD recovery.
-        if (status in setOf(GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.WAITING) &&
+        if (status in setOf(GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.WAITING,
+                GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN) &&
             !lease.acquire(token)) return
         currentStatus = status
     }
 
     /** A second controller cannot adopt a live owner's consent during asynchronous teardown. */
-    internal fun acquire(context: Context, token: Any): Boolean = available(context) && lease.acquire(token)
+    @Synchronized internal fun acquire(context: Context, token: Any): Boolean {
+        initialize(context)
+        return available(context) && lease.acquire(token)
+    }
 
     @Synchronized internal fun revoke(token: Any) = lease.revoke(token)
     internal fun owns(token: Any): Boolean = lease.owns(token)
     @Synchronized internal fun release(token: Any) {
-        if (lease.owns(token) && currentStatus in setOf(GeelyHudTrialStatus.WAITING, GeelyHudTrialStatus.SENT)) {
-            currentStatus = GeelyHudTrialStatus.OFF
-        }
+        if (!lease.owns(token)) return
         lease.release(token)
+        factoryIdleConfirmed = false
+        // Only a completed controller teardown can re-arm the saved preference. A failed owner
+        // retains its revoked lease through all later ticks and cannot resurrect itself.
+        lease.request(requestedEnabled)
+        if (currentStatus in setOf(GeelyHudTrialStatus.OFF, GeelyHudTrialStatus.WAITING,
+                GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN)) {
+            currentStatus = if (requestedEnabled) GeelyHudTrialStatus.WAITING else GeelyHudTrialStatus.OFF
+        }
+    }
+}
+
+/** Same SharedPreferences pattern as BydOutputSettings; absent preference defaults to enabled. */
+internal object GeelyHudPreferences {
+    private const val PREFS = "diplay_geely_hud"
+    private const val KEY_ENABLED = "navigation_enabled"
+
+    fun enabled(context: Context): Boolean = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        .getBoolean(KEY_ENABLED, true)
+
+    fun setEnabled(context: Context, enabled: Boolean) {
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putBoolean(KEY_ENABLED, enabled).apply()
     }
 }
 

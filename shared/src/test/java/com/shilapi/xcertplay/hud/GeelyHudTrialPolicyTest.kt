@@ -5,6 +5,17 @@ import org.junit.Test
 import java.io.IOException
 
 class GeelyHudTrialPolicyTest {
+    @Test fun `unknown factory state waits without revoking the default enabled preference`() {
+        val f = Fixture()
+        f.waiting = true
+        repeat(3) { f.policy.update(f.frame()) }
+        assertTrue(f.enabled)
+        assertTrue(f.events.isEmpty())
+        f.waiting = false
+        f.policy.update(f.frame())
+        assertEquals(listOf("begin", "guide:250"), f.events)
+    }
+
     @Test fun `external end rebuilds begin and unchanged fresh guidance after shared receiver clears`() {
         val f = Fixture()
         val frame = f.frame()
@@ -163,6 +174,7 @@ class GeelyHudTrialPolicyTest {
     private class Fixture {
         var enabled = true
         var quiet = true
+        var waiting = false
         var now = 1_000_000_000L
         var failBegin = false
         var failEnd = false
@@ -173,7 +185,14 @@ class GeelyHudTrialPolicyTest {
             override fun begin() { events += "begin"; if (failBegin) throw IOException("begin failed") }
             override fun guidance(frame: GeelyNavigationFrame) { events += "guide:${frame.distanceMeters}" }
             override fun end() { events += "end"; if (failEnd) throw IOException("end failed") }
-        }, { enabled }, { enabled = false }, { factoryChecks++; quiet }, logs::add, { now })
+        }, { enabled }, { enabled = false }, {
+            factoryChecks++
+            when {
+                !quiet -> GeelyHudFactoryReadiness.BLOCKED
+                waiting -> GeelyHudFactoryReadiness.WAITING
+                else -> GeelyHudFactoryReadiness.READY
+            }
+        }, logs::add, { now })
 
         fun frame() = GeelyNavigationFrame(2, 0, 250, "人民路", null, null, now)
     }

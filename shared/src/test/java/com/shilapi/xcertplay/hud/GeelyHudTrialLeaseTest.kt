@@ -4,7 +4,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GeelyHudTrialLeaseTest {
-    @Test fun `default and new process require explicit consent`() {
+    @Test fun `an unrequested runtime lease cannot grant output from a preference read alone`() {
         val first = GeelyHudTrialLease()
         assertFalse(first.acquire(Any()))
         first.request(true)

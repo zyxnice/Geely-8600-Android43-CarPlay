@@ -80,6 +80,7 @@ class DiPlayActivity : ComponentActivity() {
     private var status: TextView? = null
     private var geelyHudSwitch: Switch? = null
     private var geelyHudStatus: TextView? = null
+    private var geelyHudConfirmIdle: Button? = null
     private var geelyHudConsentDialog: AlertDialog? = null
     private var geelyHudSyncing = false
     private var connectButton: Button? = null
@@ -230,6 +231,7 @@ class DiPlayActivity : ComponentActivity() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
         geelyHudSwitch = null
         geelyHudStatus = null
+        geelyHudConfirmIdle = null
         hotspotToolsStatusView = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
@@ -429,26 +431,26 @@ class DiPlayActivity : ComponentActivity() {
                 geelyHudSwitch = toggle(card, getString(R.string.geely_hud_trial_toggle), getString(R.string.geely_hud_trial_description),
                     com.shilapi.xcertplay.hud.GeelyHudTrialSettings.enabled(this)) { enabled ->
                     if (geelyHudSyncing) return@toggle
-                    if (!enabled) {
-                        com.shilapi.xcertplay.hud.GeelyHudTrialSettings.setEnabled(this, false)
-                    } else {
-                        geelyHudConsentDialog = AlertDialog.Builder(this).setTitle(getString(R.string.geely_hud_trial_confirm_title))
-                            .setMessage(getString(R.string.geely_hud_trial_warning))
-                            .setPositiveButton(getString(R.string.geely_hud_trial_enable)) { _, _ ->
-                                com.shilapi.xcertplay.hud.GeelyHudTrialSettings.setEnabled(this, true)
-                                refreshGeelyHudStatus()
-                            }
-                            .setNegativeButton(android.R.string.cancel, null)
-                            .create().also { dialog ->
-                                dialog.setOnDismissListener {
-                                    geelyHudConsentDialog = null
-                                    refreshGeelyHudStatus()
-                                }
-                                dialog.show()
-                            }
-                    }
+                    com.shilapi.xcertplay.hud.GeelyHudTrialSettings.setEnabled(this, enabled)
+                    refreshGeelyHudStatus()
                 }
                 geelyHudStatus = label("", 14, MUTED).also { card.addView(it) }
+                geelyHudConfirmIdle = button(getString(R.string.geely_hud_confirm_idle), false) {
+                    geelyHudConsentDialog = AlertDialog.Builder(this).setTitle(getString(R.string.geely_hud_trial_confirm_title))
+                        .setMessage(getString(R.string.geely_hud_trial_warning))
+                        .setPositiveButton(getString(R.string.geely_hud_trial_enable)) { _, _ ->
+                            com.shilapi.xcertplay.hud.GeelyHudTrialSettings.confirmFactoryIdle(this)
+                            refreshGeelyHudStatus()
+                        }
+                        .setNegativeButton(android.R.string.cancel, null)
+                        .create().also { dialog ->
+                            dialog.setOnDismissListener {
+                                geelyHudConsentDialog = null
+                                refreshGeelyHudStatus()
+                            }
+                            dialog.show()
+                        }
+                }.also { card.addView(it) }
                 refreshGeelyHudStatus()
             }
         }
@@ -1710,6 +1712,10 @@ class DiPlayActivity : ComponentActivity() {
             GeelyHudTrialStatus.RECONNECT_REQUIRED -> R.string.geely_hud_status_reconnect
         }
         geelyHudStatus?.text = getString(text)
+        geelyHudConfirmIdle?.visibility = if (
+            com.shilapi.xcertplay.hud.GeelyHudTrialSettings.enabled(this) &&
+            com.shilapi.xcertplay.hud.GeelyHudTrialSettings.status() == GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN
+        ) View.VISIBLE else View.GONE
     }
 
     private fun refreshStatus() {

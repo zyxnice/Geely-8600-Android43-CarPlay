@@ -7,6 +7,9 @@ internal interface GeelyHudTrialPort {
     fun end()
 }
 
+/** WAITING preserves the requested switch without granting ownership of unknown factory state. */
+internal enum class GeelyHudFactoryReadiness { READY, WAITING, BLOCKED }
+
 /**
  * One explicitly enabled controller's experimental output. All calls are serialized; no queued
  * guidance survives a source handoff. Observed navigation evidence is not atomic ownership.
@@ -15,7 +18,7 @@ internal class GeelyHudTrialPolicy(
     private val port: GeelyHudTrialPort,
     private val enabled: () -> Boolean,
     private val revoke: () -> Unit,
-    private val factoryQuiet: () -> Boolean,
+    private val factoryReadiness: () -> GeelyHudFactoryReadiness,
     private val log: (String) -> Unit,
     private val nanoTime: () -> Long = System::nanoTime,
     private val status: (GeelyHudTrialStatus) -> Unit = {},
@@ -34,9 +37,16 @@ internal class GeelyHudTrialPolicy(
             status(GeelyHudTrialStatus.RECONNECT_REQUIRED)
             log("geely HUD trial remains disabled until a new controller after conflict or output failure")
         }
-        if (!factoryQuiet()) {
-            abandon("factory-active-or-unverified")
-            return
+        when (factoryReadiness()) {
+            GeelyHudFactoryReadiness.WAITING -> {
+                status(GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN)
+                return
+            }
+            GeelyHudFactoryReadiness.BLOCKED -> {
+                abandon("factory-active-or-unverified")
+                return
+            }
+            GeelyHudFactoryReadiness.READY -> Unit
         }
         if (failed || !enabled() || !fresh(frame)) {
             if (!failed && enabled() && ownsOutput) status(GeelyHudTrialStatus.STALE)
@@ -86,7 +96,7 @@ internal class GeelyHudTrialPolicy(
         if (closed) return
         revoke()
         if (ownsOutput) {
-            if (factoryQuiet()) clearOwned("controller-closed") else abandon("factory-active-on-close")
+            if (factoryReadiness() == GeelyHudFactoryReadiness.READY) clearOwned("controller-closed") else abandon("factory-active-on-close")
         }
         closed = true
     }
@@ -102,7 +112,7 @@ internal class GeelyHudTrialPolicy(
     private fun clearOwned(reason: String) {
         if (!ownsOutput || clearAttempts >= 3) return
         // Recheck immediately before a clear; do not overwrite a known factory takeover.
-        if (!factoryQuiet()) { abandon("factory-active-before-clear"); return }
+        if (factoryReadiness() != GeelyHudFactoryReadiness.READY) { abandon("factory-active-before-clear"); return }
         clearAttempts++
         try {
             port.end()

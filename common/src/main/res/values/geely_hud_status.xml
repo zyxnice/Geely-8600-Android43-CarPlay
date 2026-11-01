@@ -5,7 +5,7 @@
     <string name="geely_hud_status_sent">Navigation sent. Confirm the physical HUD display.</string>
     <string name="geely_hud_status_receiver">Trial disabled: the factory receiver or its code could not be verified.</string>
     <string name="geely_hud_status_factory">Trial disabled: factory navigation start or usable guidance was detected. End the factory route, then reconnect CarPlay.</string>
-    <string name="geely_hud_status_unknown">Trial disabled: factory navigation activity could not be checked.</string>
+    <string name="geely_hud_status_unknown">HUD is enabled and waiting for factory navigation to be idle. When parked, confirm below if no factory route is guiding.</string>
     <string name="geely_hud_status_source">Another navigation source was detected. Trial output is off; no end was sent over its route.</string>
     <string name="geely_hud_status_stale">No fresh guidance. A clear was requested; confirm the HUD.</string>
     <string name="geely_hud_status_send_failed">Trial output failed and was disabled. Reconnect CarPlay before retrying.</string>

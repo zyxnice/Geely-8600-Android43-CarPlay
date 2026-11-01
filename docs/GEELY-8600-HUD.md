@@ -2,13 +2,13 @@
 
 ## 当前交付（2026-11-01 修订）
 
-已在独立分支工作区 `codex/geely8600-hud-implementation-20261031` 将原观测能力移植到当前代码，并实现**默认关闭、每次应用运行需手动确认的原厂HUD试验出口**。实际HUD显示、原车接管、异常残留尚未实车验收；实现和本地测试不能视为日常可用。
+HUD trial2 已覆盖安装到目标车机，用户本次现场反馈“可以了”；功能代码 `1fbc7cc` 已合入并推送 `main`。实现为**默认关闭、每次应用运行需手动确认的原厂 HUD 试验出口**。本次可用反馈不等于全部图标、原车接管、异常残留与长期稳定性都已验收。当前候选 SHA 和分项状态见[当前状态](GEELY-8600-STATUS.md)。
 
-构建基线为已装车的 USB两秒r2 + VPN修复 + output3媒体源码。独立构建副本逐文件保留这些文件，不混入工作区output4诊断。包名/versionCode继续保持可同签覆盖，候选以文件名和SHA区分，不卸载清数据。当前授权包含安装候选后正常关闭车机，不包含无人值守发送导航试验消息。
+构建基线为已装车的 USB两秒r2 + VPN修复 + output3媒体源码。独立构建副本逐文件保留这些文件，不混入工作区output4诊断。包名/versionCode继续保持可同签覆盖，候选以文件名和SHA区分，不卸载清数据。原先安装后关机的要求已由用户取消；安装与调试记录不代表存在持续无人值守操作授权。
 
 入口在设置页“吉利 HUD 导航试验”。开启前确认停车/台架、原车导航未在引导及原厂状态变化/残留风险；应用重启不恢复授权。页面每秒同步实际开关和拒绝原因。原车语音绑定和后台自动服务可以启动高德，因此本次修订不再以进程存在作为导航冲突证据。
 
-数据链路：iAP2 0x5201/0x5202 → Iap2RouteState → GeelyNavigationFrame → GeelyHudTrialPolicy → **显式**原厂AutoNaviReceiver。Apple也明确HUD应使用iAP2导航元数据，而非截取主屏视频，见[WWDC23](https://developer.apple.com/videos/play/wwdc2023/10150/)及[WWDC25](https://developer.apple.com/videos/play/wwdc2025/216/)。目标iPhone/高德版本是否提供这些字段仍需实测。
+数据链路：iAP2 0x5201/0x5202 → Iap2RouteState → GeelyNavigationFrame → GeelyHudTrialPolicy → **显式**原厂AutoNaviReceiver。Apple也明确HUD应使用iAP2导航元数据，而非截取主屏视频，见[WWDC23](https://developer.apple.com/videos/play/wwdc2023/10150/)及[WWDC25](https://developer.apple.com/videos/play/wwdc2025/216/)。本次实机已收到并解析目标手机的路线、转向、距离和路名；其他手机、导航应用或版本是否提供同样字段仍需分别验证。
 
 - `GeelyHudTrialSettings/GeelyHudTrialLease`：进程内同意、单一owner，停用后保留互斥直到清理结束；旧关闭任务不能释放新owner。
 - `GeelyHudTrialPolicy`：开始8、实时引导、结束9；独立距离更新时间超过5秒时尝试清除，稳定数据不重复发送。清除失败最多3次，错误在界面与日志保留。这里是应用侧截止时间，不代表物理HUD的自动TTL。
@@ -26,13 +26,13 @@
 
 ### 当前构建与制品
 
-本次修订构建/校验入口：`D:/geely/analysis/build_geely_hud_source_state_20261101.py`，从实际已装trial1源码仅覆盖HUD状态相关九项文件，媒体、USB和VPN保留。使用已有Gradle、显式本地认证输入和同一签名；执行shared/common回归、geelyUsb与普通debug构建、USB/签名/认证资产和导航metadata隔离检查。导航校验器用 `-Mode Trial`，普通构建用 `-Mode Disabled`。本次结果与安装记录见 `docs/aegis/work/2026-11-01-geely-hud-source-state/90-evidence.md`；旧trial1记录保留在 `docs/aegis/work/2026-10-31-geely-hud-output/90-evidence.md`。
+当前源码构建入口见[构建说明](BUILD.md)，本候选使用 `-PgeelyPerformanceStage=B`。装车 trial2 从实装 trial1 源码仅修改 HUD 状态相关九项文件，媒体、USB和VPN保留。817项回归中814通过、3项既有跳过；geelyUsb/debug构建、USB/签名/认证资产及metadata隔离检查通过。导航校验器用 `-Mode Trial`，普通构建用 `-Mode Disabled`。详细结果见[本次安装与反馈](aegis/work/2026-11-01-geely-hud-source-state/90-evidence.md)，[旧trial1记录](aegis/work/2026-10-31-geely-hud-output/90-evidence.md)保留为历史。
 
 下一次停车试验需分别确认真实手机数据、HUD方向/距离/路名、结束和过期清除、原车导航恢复。实际输出保持手动关闭，未经本次人工确认不会发送导航。
 
 ## 历史观测版本边界（2026-10-26）
 
-以下保留原会话的只观测交付记录和当时未完成项；“当前/本版本”在以下历史小节中指10月26日观测版，现状以上方10月31日章节为准。
+以下各节保留原会话的只观测交付记录和当时未完成项；“当前/本版本”在以下历史内容中指10月26日观测版，现状以上方11月1日章节及[当前状态](GEELY-8600-STATUS.md)为准。
 
 本分支从 fork main `5ab0777` 开发，8600 `geelyUsb` 变体版本后缀为 `H53-USB1-NAVOBS1`。当前实现只接收并记录 iPhone 导航元数据，生成离线候选字段；没有原厂导航广播发送器、车辆透传调用或可打开的 HUD 输出开关。本版本不能将 CarPlay 导航显示到 HUD。
 

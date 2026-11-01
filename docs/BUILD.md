@@ -4,6 +4,14 @@
 
 ## 8600 车测变体
 
+2026-11-01 已合入的实装基线为 USB3-B/output3 + VPN + USB r2 + HUD trial2，详见[当前状态](GEELY-8600-STATUS.md)。构建本基线需显式选择 B：
+
+```powershell
+.\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb '-PgeelyPerformanceStage=B'
+```
+
+本候选完成817项测试（814通过、3项既有跳过）及geelyUsb/debug构建、APK兼容校验；shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD默认关闭，真实显示与异常恢复依赖独立实车验收。
+
 使用仓库内 Gradle wrapper；以下命令在 Windows PowerShell 仓库根目录执行：
 
 ```powershell

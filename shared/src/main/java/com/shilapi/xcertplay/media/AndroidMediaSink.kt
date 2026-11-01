@@ -643,12 +643,16 @@ private class VideoDecoder(
     private var submittedFrameLogged = false
     private var duplicateConfigLogged = false
     private val referenceChain = VideoReferenceChain()
-    private val recoveryPolicy = VideoRecoveryPolicy(performance.softVideoRecovery)
+    // B keeps its 60-frame queue: recovery is independent of C's receive-queue experiment.
+    private val recoveryPolicy = VideoRecoveryPolicy(
+        performance.stage == "B" || performance.softVideoRecovery,
+        monitorProgress = performance.stage == "B",
+    )
     private var lastKeyFrameRequestNs = 0L
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
     private val pipeline = VideoPipelineStats(report = { report(it) })
-    // This candidate changes only the validated B hardware path. C's recovery experiment stays off.
+    // Output selection remains scoped to the B hardware candidate.
     private val latestDecodedOutput = performance.stage == "B"
     private val thread = Thread(::run, "carplay-video").apply { isDaemon = true; start() }
 
@@ -690,9 +694,18 @@ private class VideoDecoder(
                         is VideoJob.Frame -> {
                             pipeline.record(VideoPipelineStats.Stage.QUEUE_AGE, System.nanoTime() - job.receivedNs)
                             if (System.nanoTime() - job.receivedNs > MAX_FRAME_AGE_NS) {
-                                queue.discardFrames()
-                                recover("video backlog exceeded 250 ms", referenceGap = true)
-                            } else feed(job.nalus)
+                                val catchUp = if (performance.stage == "B" && lastConfig?.codec == VideoCodec.H264) {
+                                    queue.takeFreshH264KeyFrame(System.nanoTime(), MAX_FRAME_AGE_NS)
+                                } else null
+                                if (catchUp == null) {
+                                    queue.discardFrames()
+                                    recover("video backlog exceeded 250 ms", referenceGap = true)
+                                } else {
+                                    recover("video backlog; queued IDR available, discarded=${catchUp.discarded + 1}",
+                                        referenceGap = true)
+                                    feed(catchUp.frame)
+                                }
+                            } else feed(job)
                         }
                         is VideoJob.SurfaceChanged -> changeSurface(job.surface)
                         is VideoJob.Resync -> recover(job.reason, referenceGap = true)
@@ -701,6 +714,8 @@ private class VideoDecoder(
                     decoder?.let(::drainOutput)
                     if (recoveryPolicy.disableIfOutputTimedOut(System.nanoTime())) {
                         recover("soft recovery keyframe produced no output within 1000 ms; disabled for this stream")
+                    } else if (recoveryPolicy.consumeOutputStall(System.nanoTime())) {
+                        recover("accepted at least 30 video inputs without output for 1500 ms", referenceGap = true)
                     }
                     stats.logIfDue()?.let(report)
                     pipeline.flush()
@@ -870,12 +885,16 @@ private class VideoDecoder(
         lastConfig?.let(::configureDecoder)
     }
 
-    private fun feed(nalus: ByteArray) {
+    private fun feed(frame: VideoJob.Frame) {
+        val nalus = frame.nalus
         val annexB = MediaCodecSupport.toAnnexB(nalus)
         val config = lastConfig ?: return
         if (outputSurface == null) return
         if (annexB.isEmpty()) { recover("invalid video access unit"); return }
         if (!referenceChain.accepts(annexB, config.codec)) {
+            if (recoveryPolicy.reportKeyFrameWaitIfDue(System.nanoTime())) {
+                report("recovery wait=keyframe-input; dependent frames continue for 5000 ms; codec failure unproven")
+            }
             requestKeyFrameIfDue()
             return
         }
@@ -892,7 +911,8 @@ private class VideoDecoder(
         val inputWaitStarted = System.nanoTime()
         val index = VideoInputPump.acquire(
             running = { running }, drain = { drainOutput(codec) },
-            dequeue = { codec.dequeueInputBuffer(INPUT_TIMEOUT_US) },
+            // Keep output service opportunities frequent on B without a zero-timeout busy loop.
+            dequeue = { codec.dequeueInputBuffer(if (performance.stage == "B") 1_000L else INPUT_TIMEOUT_US) },
         )
         // Includes output draining while input is unavailable; OUTPUT_* timings expose that work.
         pipeline.record(VideoPipelineStats.Stage.INPUT_WAIT, System.nanoTime() - inputWaitStarted)
@@ -906,6 +926,8 @@ private class VideoDecoder(
             pipeline.record(VideoPipelineStats.Stage.INPUT_COPY, queuedNs - copyStarted)
             val presentationTimeUs = queuedNs / 1000
             codec.queueInputBuffer(index, 0, annexB.size, presentationTimeUs, 0)
+            pipeline.input(presentationTimeUs, frame.receivedNs)
+            recoveryPolicy.onInputQueued(queuedNs)
             pipeline.record(VideoPipelineStats.Stage.INPUT_SUBMIT, System.nanoTime() - queuedNs)
             if (referenceChain.needsKeyFrame) {
                 recoveryPolicy.onKeyFrameQueued(presentationTimeUs, queuedNs)
@@ -1011,10 +1033,14 @@ private class VideoDecoder(
         val started = System.nanoTime()
         val render = outputGate?.release(requestRender) { codec.releaseOutputBuffer(index, it) }
             ?: requestRender.also { codec.releaseOutputBuffer(index, it) }
-        pipeline.record(VideoPipelineStats.Stage.OUTPUT_RELEASE, System.nanoTime() - started)
+        val submittedNs = System.nanoTime()
+        pipeline.record(VideoPipelineStats.Stage.OUTPUT_RELEASE, submittedNs - started)
         val picture = flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 &&
             !(flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && bytes == 0)
-        if (picture) pipeline.output(render)
+        if (picture) {
+            pipeline.output(render)
+            pipeline.released(presentationTimeUs, render, submittedNs)
+        }
         if (render) {
             if (flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0) recoveryPolicy.onRendered()
             stats.onRendered()
@@ -1049,6 +1075,7 @@ private class VideoDecoder(
     @Synchronized
     private fun releaseDecoder() {
         recoveryPolicy.onDecoderChanged()
+        pipeline.decoderChanged()
         val codec = decoder
         decoder = null
         if (codec != null) {

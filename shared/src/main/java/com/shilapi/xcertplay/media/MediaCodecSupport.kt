@@ -94,6 +94,24 @@ object MediaCodecSupport {
         return output
     }
 
+    /** Inspect a queued AVC access unit without allocating an Annex B copy while holding its queue lock. */
+    internal fun isH264KeyFrame(nalus: ByteArray): Boolean {
+        if (nalus.size >= 4 && nalus[0] == 0.toByte() && nalus[1] == 0.toByte() &&
+            nalus[2] == 0.toByte() && nalus[3] == 1.toByte()) {
+            return isRandomAccess(nalus, VideoCodec.H264)
+        }
+        var offset = 0
+        var hasIdr = false
+        while (offset + 4 <= nalus.size) {
+            val length = readU32Be(nalus, offset)
+            offset += 4
+            if (length <= 0 || length > nalus.size - offset) return false
+            if (nalus[offset].toInt() and 0x1f == 5) hasIdr = true
+            offset += length
+        }
+        return hasIdr && offset == nalus.size
+    }
+
     /** IDR (AVC) or IRAP (HEVC) starts an independently decodable reference chain. */
     fun isRandomAccess(annexB: ByteArray, codec: VideoCodec): Boolean {
         var cursor = 0

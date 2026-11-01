@@ -33,6 +33,7 @@ import com.shilapi.xcertplay.airplay.VideoInCar
 import com.shilapi.xcertplay.compat.systemService
 import com.shilapi.xcertplay.compat.appPrivateDir
 import com.shilapi.xcertplay.hud.BydNavigationOutputs
+import com.shilapi.xcertplay.hud.GeelyNavigationObservation
 import com.shilapi.xcertplay.iap2.session.Iap2Session
 import com.shilapi.xcertplay.mfi.Iap2MfiAuthenticationClient
 import com.shilapi.xcertplay.mfi.MfiAuthenticationClient
@@ -156,11 +157,13 @@ class CarPlayController(
     private val vehicleStatusProvider: com.shilapi.xcertplay.transport.VehicleStatusProvider? = null,
     private val geelyBluetoothEnabled: Boolean = false,
 ) : Closeable {
+    private val geelyNavigation = GeelyNavigationObservation.create(context.applicationContext, ::debugLog)
+
     init {
         require(!config.locationReportingEnabled || locationProvider != null) {
             "A location provider is required when location reporting is enabled"
         }
-        BydNavigationOutputs.start(context.applicationContext)
+        if (geelyNavigation == null) BydNavigationOutputs.start(context.applicationContext)
         BydNavigationOutputs.setClusterStreamControl(::applyClusterUi)
     }
 
@@ -267,7 +270,8 @@ class CarPlayController(
     private val sessionListener = object : AirPlaySessionListener {
         override fun onSessionActive(session: AirPlaySession) {
             if (activeSession !== session) {
-                BydNavigationOutputs.start(appContext)
+                if (geelyNavigation == null) BydNavigationOutputs.start(appContext)
+                else geelyNavigation.resume()
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(true)
                 // The gear may have changed since /info.
                 if (videoListener != null) session.setVideoPlaybackAllowed(VideoInCar.allowed)
@@ -283,7 +287,8 @@ class CarPlayController(
         override fun onSessionEnded(session: AirPlaySession) {
             if (activeSession === session) {
                 activeSession = null
-                BydNavigationOutputs.endNow()
+                if (geelyNavigation == null) BydNavigationOutputs.endNow()
+                else geelyNavigation.pause()
                 com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
                 videoListener?.onVideoSessionEnded()
                 synchronized(playbackStatus) {
@@ -454,7 +459,8 @@ class CarPlayController(
         val teardownStarted = System.nanoTime()
         connectionDiagnostic("teardown begin transport=${config.transport}")
         videoGate?.close()
-        BydNavigationOutputs.endNow()
+        if (geelyNavigation == null) BydNavigationOutputs.endNow()
+        else geelyNavigation.close()
         com.shilapi.xcertplay.glance.CarPlayGlance.setConnected(false)
         BydNavigationOutputs.clearClusterStreamControl(::applyClusterUi)
         closeReceivers()
@@ -534,9 +540,21 @@ class CarPlayController(
         }
     }
 
-    // HUD (SOME/IP) and cluster (AMap broadcast) keep separate state so one failing cannot stall the other.
-    private fun onRouteFrame(frame: com.shilapi.xcertplay.iap2.wire.Iap2Frame) {
-        BydNavigationOutputs.onFrame(frame)
+    // Each control receiver owns a token; a replaced bootstrap/tunnel cannot revive an old route.
+    private fun newRouteReceiver(wirelessRun: Int? = null): (com.shilapi.xcertplay.iap2.wire.Iap2Frame) -> Unit {
+        if (geelyNavigation != null && (closed || wirelessRun?.let { it != wirelessGeneration.get() } == true)) return {}
+        val channel = geelyNavigation?.beginChannel(wirelessRun ?: 0)
+        return { frame ->
+            if (geelyNavigation == null || (!closed && wirelessRun?.let { it != wirelessGeneration.get() } != true)) {
+                onRouteFrame(frame, channel)
+            }
+        }
+    }
+
+    private fun onRouteFrame(frame: com.shilapi.xcertplay.iap2.wire.Iap2Frame, channel: Long?) {
+        if (geelyNavigation != null) {
+            if (channel == null || !geelyNavigation.accept(channel, frame)) return
+        } else BydNavigationOutputs.onFrame(frame)
         com.shilapi.xcertplay.glance.CarPlayGlance.onFrame(frame)
         synchronized(playbackStatus) {
             val previousPlaying = playbackStatus.playing
@@ -1114,7 +1132,7 @@ class CarPlayController(
                 locationProvider = locationProvider,
                 vehicleStatusProvider = vehicleStatusProvider,
                 locationRequest = wirelessLocationRequest,
-                onIncoming = ::onRouteFrame,
+                onIncoming = newRouteReceiver(generation),
                 onStage = { stage ->
                     if (!isStaleWirelessRun(generation) && !wirelessActiveReported.get()) {
                         when (stage) {
@@ -1207,6 +1225,10 @@ class CarPlayController(
         return try {
             tunnelExecutor.execute {
                 try {
+                    if (closed || generation != wirelessGeneration.get()) {
+                        channel.close()
+                        return@execute
+                    }
                     val result = Iap2WirelessControlClient(
                         session = channel,
                         mfi = Iap2MfiAuthenticationClient(mfi),
@@ -1222,7 +1244,7 @@ class CarPlayController(
                         onReady = {
                             onWirelessTunnelReady(generation)
                         },
-                        onIncoming = ::onRouteFrame,
+                        onIncoming = newRouteReceiver(generation),
                         onProgress = { message -> debugLog("iAP tunnel $message") },
                     )
                     if (closed || generation != wirelessGeneration.get()) return@execute
@@ -1792,7 +1814,7 @@ class CarPlayController(
                 timeoutMillis = controlLoopTimeoutMillis(),
                 locationProvider = locationProvider,
                 vehicleStatusProvider = vehicleStatusProvider,
-                onIncoming = ::onRouteFrame,
+                onIncoming = newRouteReceiver(),
                 onProgress = { message -> debugLog("wired $message") },
                 mediaStartupState = {
                     com.shilapi.xcertplay.transport.WiredMediaStartupState(

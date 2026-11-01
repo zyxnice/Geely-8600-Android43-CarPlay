@@ -9,7 +9,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 
-/** One-shot OEM child. Only prepare(deadline) is accepted; no caller-supplied shell or paths. */
+/** One-shot OEM child for fixed preparation/enumeration recovery; no caller-supplied shell or paths. */
 public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
     static final String ENTRY_POINT = "com.shilapi.xcertplay.compat.GeelyUsbRuntimeHelper";
     private static final String OTG = "/sys/class/otg_peripheral/";
@@ -32,8 +32,10 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
         watchdog.setDaemon(true);
         watchdog.start();
         try {
-            if (arguments.length != 3 || !arguments[0].matches("[0-9]{1,16}")
-                    || !arguments[2].matches("[a-f0-9]{32}")) throw new IOException("runtime_arguments");
+            if (arguments.length != 4 || !arguments[0].matches("[0-9]{1,16}")
+                    || !arguments[2].matches("[a-f0-9]{32}")
+                    || (!"prepare".equals(arguments[3]) && !"recover-enumeration".equals(arguments[3])))
+                throw new IOException("runtime_arguments");
             File lease = new File(arguments[1]);
             if (!lease.getCanonicalFile().equals(lease) || !lease.getName().equals("runtime-" + arguments[2] + ".lease")
                     || !lease.getParent().equals("/data/data/com.shihab.diplay.repair1.geely8600/files/geely-usb"))
@@ -43,7 +45,9 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
                 throw new IOException("runtime_expired");
             if (Process.myUid() != 0 || !GeelyUsbRuntimePolicy.matches(Build.VERSION.SDK_INT, Build.BOARD, Build.DISPLAY, true))
                 throw new IOException("runtime_platform_guard");
-            String result = GeelyUsbRuntimePolicy.prepare(new GeelyUsbRuntimeHelper(deadline, lease, arguments[2]));
+            GeelyUsbRuntimeHelper port = new GeelyUsbRuntimeHelper(deadline, lease, arguments[2]);
+            String result = "prepare".equals(arguments[3]) ? GeelyUsbRuntimePolicy.prepare(port)
+                    : GeelyUsbRuntimePolicy.recoverEnumeration(port);
             System.out.println("GEELY_RUNTIME_OK:" + result);
         } catch (Exception failure) {
             String reason = failure.getMessage();
@@ -63,6 +67,13 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
 
     @Override public void beginRollback() { rollingBack = true; }
 
+    @Override public void awaitPowerOff() throws Exception {
+        // Allow the phone to observe VBUS removal before restoring the existing Host port.
+        checkDeadline();
+        Thread.sleep(500);
+        checkDeadline();
+    }
+
     @Override public void awaitRestored(GeelyUsbRuntimePolicy.State original) throws Exception {
         do {
             checkDeadline();
@@ -75,9 +86,9 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
 
     @Override public GeelyUsbRuntimePolicy.State read() throws Exception {
         checkDeadline();
-        return new GeelyUsbRuntimePolicy.State(property("sys.usb.config"),
+        return new GeelyUsbRuntimePolicy.State(property("sys.usb.config"), property("sys.usb.state"),
                 text("/proc/driver/usbroleswitch/0/mode"), text(OTG + "charging_mode"),
-                text(OTG + "power"), text(OTG + "pin_fault/status"), activeApple());
+                text(OTG + "power"), text(OTG + "pin_fault/status"), activeApple(), busOccupied());
     }
 
     @Override public void configuration(String value) throws Exception {
@@ -140,6 +151,17 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
         for (File path : paths) {
             if (!GeelyUsbIdentity.isValidSysfsName(path.getName()) || !path.getName().startsWith("1-")) continue;
             if ("05ac".equals(text(path + "/idVendor")) && "6".equals(text(path + "/bConfigurationValue"))) return true;
+        }
+        return false;
+    }
+
+    private static boolean busOccupied() throws IOException {
+        File[] paths = new File("/sys/bus/usb/devices").listFiles();
+        if (paths == null) throw new IOException("runtime_usb_listing");
+        for (File path : paths) {
+            // Bus 1 is the H53 OTG port. Other buses include the vehicle's built-in devices.
+            // Include interface/incomplete names too: uncertainty must prevent a power cycle.
+            if (GeelyUsbRuntimePolicy.occupiesOtgBus(path.getName())) return true;
         }
         return false;
     }

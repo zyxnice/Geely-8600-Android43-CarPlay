@@ -33,6 +33,7 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import com.shilapi.xcertplay.airplay.CarPlayClusterDisplay
+import com.shilapi.xcertplay.hud.GeelyHudTrialStatus
 import com.shilapi.xcertplay.compat.AnwPowerState
 import com.shilapi.xcertplay.compat.BindingState
 import com.shilapi.xcertplay.compat.GeelyBluetoothDiagnostics
@@ -77,6 +78,10 @@ class DiPlayActivity : ComponentActivity() {
     private var pendingCarHotspotSetup = false
     private var setupError: String? = null
     private var status: TextView? = null
+    private var geelyHudSwitch: Switch? = null
+    private var geelyHudStatus: TextView? = null
+    private var geelyHudConsentDialog: AlertDialog? = null
+    private var geelyHudSyncing = false
     private var connectButton: Button? = null
     private var disconnectButton: Button? = null
     private var lastRunning: Boolean? = null
@@ -210,6 +215,7 @@ class DiPlayActivity : ComponentActivity() {
     override fun onPause() { activityResumed = false; handler.removeCallbacks(tick); super.onPause() }
 
     override fun onDestroy() {
+        geelyHudConsentDialog?.dismiss()
         cancelGeelyPhoneLookup()
         cancelBluetoothStatusProbe()
         hotspotOperationGeneration++
@@ -222,6 +228,8 @@ class DiPlayActivity : ComponentActivity() {
 
     private fun render() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
+        geelyHudSwitch = null
+        geelyHudStatus = null
         hotspotToolsStatusView = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
@@ -414,6 +422,34 @@ class DiPlayActivity : ComponentActivity() {
                 } else {
                     reconnectForLocation()
                 }
+            }
+        }
+        if (com.shilapi.xcertplay.hud.GeelyHudTrialSettings.available(this)) {
+            section(content, getString(R.string.geely_hud_trial_title), R.drawable.ic_dp_navigation) { card ->
+                geelyHudSwitch = toggle(card, getString(R.string.geely_hud_trial_toggle), getString(R.string.geely_hud_trial_description),
+                    com.shilapi.xcertplay.hud.GeelyHudTrialSettings.enabled(this)) { enabled ->
+                    if (geelyHudSyncing) return@toggle
+                    if (!enabled) {
+                        com.shilapi.xcertplay.hud.GeelyHudTrialSettings.setEnabled(this, false)
+                    } else {
+                        geelyHudConsentDialog = AlertDialog.Builder(this).setTitle(getString(R.string.geely_hud_trial_confirm_title))
+                            .setMessage(getString(R.string.geely_hud_trial_warning))
+                            .setPositiveButton(getString(R.string.geely_hud_trial_enable)) { _, _ ->
+                                com.shilapi.xcertplay.hud.GeelyHudTrialSettings.setEnabled(this, true)
+                                refreshGeelyHudStatus()
+                            }
+                            .setNegativeButton(android.R.string.cancel, null)
+                            .create().also { dialog ->
+                                dialog.setOnDismissListener {
+                                    geelyHudConsentDialog = null
+                                    refreshGeelyHudStatus()
+                                }
+                                dialog.show()
+                            }
+                    }
+                }
+                geelyHudStatus = label("", 14, MUTED).also { card.addView(it) }
+                refreshGeelyHudStatus()
             }
         }
         if (com.shilapi.xcertplay.hud.BydOutputSettings.available(this)) section(content, getString(R.string.byd_navigation), R.drawable.ic_dp_navigation) { card ->
@@ -1652,7 +1688,32 @@ class DiPlayActivity : ComponentActivity() {
         }
     }
 
+    private fun refreshGeelyHudStatus() {
+        if (geelyHudSwitch == null) return
+        if (geelyHudConsentDialog?.isShowing != true) {
+            geelyHudSyncing = true
+            try {
+                geelyHudSwitch?.isChecked = com.shilapi.xcertplay.hud.GeelyHudTrialSettings.enabled(this)
+            } finally { geelyHudSyncing = false }
+        }
+        val text = when (com.shilapi.xcertplay.hud.GeelyHudTrialSettings.status()) {
+            GeelyHudTrialStatus.OFF -> R.string.geely_hud_status_off
+            GeelyHudTrialStatus.WAITING -> R.string.geely_hud_status_waiting
+            GeelyHudTrialStatus.SENT -> R.string.geely_hud_status_sent
+            GeelyHudTrialStatus.RECEIVER_UNVERIFIED -> R.string.geely_hud_status_receiver
+            GeelyHudTrialStatus.FACTORY_RUNNING -> R.string.geely_hud_status_factory
+            GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN -> R.string.geely_hud_status_unknown
+            GeelyHudTrialStatus.SOURCE_CHANGED -> R.string.geely_hud_status_source
+            GeelyHudTrialStatus.STALE -> R.string.geely_hud_status_stale
+            GeelyHudTrialStatus.SEND_FAILED -> R.string.geely_hud_status_send_failed
+            GeelyHudTrialStatus.CLEAR_FAILED -> R.string.geely_hud_status_clear_failed
+            GeelyHudTrialStatus.RECONNECT_REQUIRED -> R.string.geely_hud_status_reconnect
+        }
+        geelyHudStatus?.text = getString(text)
+    }
+
     private fun refreshStatus() {
+        refreshGeelyHudStatus()
         val running = CarPlayBackgroundSession.hasSession()
         status?.text = when {
             setupError != null -> getString(R.string.setup_needs_attention)

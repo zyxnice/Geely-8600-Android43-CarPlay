@@ -5,7 +5,7 @@
     <string name="geely_hud_status_sent">已发送导航，请观察实际 HUD 显示。</string>
     <string name="geely_hud_status_receiver">试验已关闭：原厂接收组件或代码未通过核验。</string>
     <string name="geely_hud_status_factory">试验已关闭：检测到原车导航开始或有效引导数据。请结束原车导航，重新连接 CarPlay 后再试。</string>
-    <string name="geely_hud_status_unknown">试验已关闭：无法核对原车导航运行状态。</string>
+    <string name="geely_hud_status_unknown">HUD 已开启，等待确认原车导航空闲。停车确认未在引导后，可点击下方确认。</string>
     <string name="geely_hud_status_source">检测到其他导航来源，试验已关闭，未向其补发结束消息。</string>
     <string name="geely_hud_status_stale">导航数据失效，已请求清除，请观察 HUD。</string>
     <string name="geely_hud_status_send_failed">导航发送失败，试验已关闭。请重新连接 CarPlay 后再试。</string>

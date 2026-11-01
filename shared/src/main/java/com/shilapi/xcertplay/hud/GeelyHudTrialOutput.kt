@@ -39,7 +39,7 @@ internal class GeelyHudTrialOutput(
         },
         enabled = { GeelyHudTrialSettings.acquire(app, ownerToken) },
         revoke = { GeelyHudTrialSettings.revoke(ownerToken) },
-        factoryQuiet = ::factoryQuiet,
+        factoryReadiness = ::factoryReadiness,
         log = log,
         status = { GeelyHudTrialSettings.report(ownerToken, it) },
     )
@@ -112,7 +112,8 @@ internal class GeelyHudTrialOutput(
 
     private fun dispatch(fields: Map<String, Any>, requireConsent: Boolean) {
         check(registered && currentGeneration(channel) && GeelyHudTrialSettings.owns(ownerToken) &&
-            (!requireConsent || GeelyHudTrialSettings.acquire(app, ownerToken)) && factoryQuiet()) {
+            (!requireConsent || GeelyHudTrialSettings.acquire(app, ownerToken)) &&
+            factoryReadiness() == GeelyHudFactoryReadiness.READY) {
             "factory_receiver_not_exclusive"
         }
         val intent = Intent(ACTION).setComponent(RECEIVER)
@@ -127,20 +128,27 @@ internal class GeelyHudTrialOutput(
         app.sendBroadcast(intent)
     }
 
-    private fun factoryQuiet(): Boolean {
-        if (!GeelyHudTrialSettings.available(app)) return false
+    private fun factoryReadiness(): GeelyHudFactoryReadiness {
+        if (!GeelyHudTrialSettings.available(app)) return GeelyHudFactoryReadiness.BLOCKED
         // Verify once on the worker, not on the UI thread or for every distance update.
         if (factoryVerified == null) factoryVerified = verifyFactory()
         if (factoryVerified != true) {
             GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.RECEIVER_UNVERIFIED)
-            return false
+            return GeelyHudFactoryReadiness.BLOCKED
         }
         // Voice binding and AutoBackgroundService start AMap without a navigation route.
-        // A process list cannot establish route ownership. UNKNOWN remains a documented manual
-        // trial limitation; active route evidence always blocks, even after a quiet interval.
-        val quiet = factoryNavigation.activity != GeelyFactoryNavigationState.Activity.ACTIVE
-        if (!quiet) GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.FACTORY_RUNNING)
-        return quiet
+        // A process list cannot establish route ownership. Default ON is a preference, not proof
+        // of an idle factory route. UNKNOWN waits for an end event or this owner's explicit check.
+        return when (factoryNavigation.activity) {
+            GeelyFactoryNavigationState.Activity.ACTIVE -> {
+                GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.FACTORY_RUNNING)
+                GeelyHudFactoryReadiness.BLOCKED
+            }
+            GeelyFactoryNavigationState.Activity.INACTIVE -> GeelyHudFactoryReadiness.READY
+            GeelyFactoryNavigationState.Activity.UNKNOWN ->
+                if (GeelyHudTrialSettings.factoryIdleConfirmed(ownerToken)) GeelyHudFactoryReadiness.READY
+                else GeelyHudFactoryReadiness.WAITING
+        }
     }
 
     private fun verifyFactory(): Boolean = try {

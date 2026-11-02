@@ -485,7 +485,8 @@
     <string name="geely_audio_alert">媒体 23＋播报 11，提示音 25</string>
     <string name="geely_audio_unavailable">未检测到 H52 专用音频接口，请使用通用通道。</string>
     <string name="geely_audio_detected">已检测到 H52 专用接口：CarPlay 23，导航播报 11。</string>
-    <string name="geely_audio_hint">H52 模式使用专用媒体和导航通道，并分别申请音频焦点。导航播报仍使用 11；可选将提示音分到 25。原厂 25 通道仍需实车验证。修改后重新连接，实际声音和混音效果需实车确认。</string>
+    <string name="geely_audio_hint">原厂模式区分音乐与导航音量。8600 的导航播报与提示音共用导航通道；播报排空并短暂安静后释放焦点。切换模式后重新连接，实际声音和混音效果需实车确认。</string>
+    <string name="geely_navigation_volume">原车导航音量</string>
     <string name="geely_audio_preview">试听 H52 原厂通道</string>
     <string name="geely_audio_test_media">CarPlay 媒体（23）</string>
     <string name="geely_audio_test_speech">导航播报（11）</string>

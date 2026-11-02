@@ -958,7 +958,7 @@ class DiPlayActivity : ComponentActivity() {
     private fun geelyAudioControl(parent: LinearLayout) {
         val capabilities = com.shilapi.xcertplay.media.GeelyAudioCapabilities.detect()
         val selected = AirPlayPersistence.loadGeelyAudioRouting(this)
-        val alert = AirPlayPersistence.loadGeelyNavigationAlert(this)
+        val alert = capabilities?.navigationAlert != null && AirPlayPersistence.loadGeelyNavigationAlert(this)
         fun summary(): String = getString(R.string.geely_audio_profile) + " · " + getString(
             if (!selected || capabilities == null) R.string.geely_audio_generic
             else if (alert) R.string.geely_audio_alert else R.string.geely_audio_speech)
@@ -987,6 +987,29 @@ class DiPlayActivity : ComponentActivity() {
         parent.addView(control, matchButton(0, 60))
         parent.addView(label(getString(if (capabilities == null) R.string.geely_audio_unavailable else R.string.geely_audio_detected), 14, MUTED))
         parent.addView(label(getString(R.string.geely_audio_hint), 14, MUTED))
+        if (capabilities != null) parent.addView(button(getString(R.string.geely_navigation_volume), false) {
+            val audio = getSystemService(Context.AUDIO_SERVICE) as android.media.AudioManager
+            try {
+                val stream = capabilities.navigationSpeech
+                val maximum = audio.getStreamMaxVolume(stream)
+                val current = audio.getStreamVolume(stream).coerceIn(0, maximum)
+                // Use the actual OEM stream's steps, not AMap's UI-specific fourfold conversion.
+                AlertDialog.Builder(this).setTitle(getString(R.string.geely_navigation_volume))
+                    .setSingleChoiceItems((0..maximum).map { "$it / $maximum" }.toTypedArray(), current) { dialog, level ->
+                        try {
+                            audio.setStreamVolume(stream, level, 0)
+                            android.util.Log.i("GeelyAudio", "navigation volume stream=$stream requested=$level actual=${audio.getStreamVolume(stream)}")
+                        } catch (error: Exception) {
+                            android.util.Log.w("GeelyAudio", "navigation volume update failed", error)
+                            toast(getString(R.string.geely_audio_unavailable))
+                        }
+                        dialog.dismiss()
+                    }.setNegativeButton(getString(R.string.cancel), null).show()
+            } catch (error: Exception) {
+                android.util.Log.w("GeelyAudio", "navigation volume query failed", error)
+                toast(getString(R.string.geely_audio_unavailable))
+            }
+        }, matchButton(8, 60))
         if (capabilities != null) parent.addView(button(getString(R.string.geely_audio_preview), false) {
             val routes = listOf(capabilities.carPlay, capabilities.navigationSpeech) + listOfNotNull(capabilities.navigationAlert)
             val labels = listOf(getString(R.string.geely_audio_test_media), getString(R.string.geely_audio_test_speech)) +

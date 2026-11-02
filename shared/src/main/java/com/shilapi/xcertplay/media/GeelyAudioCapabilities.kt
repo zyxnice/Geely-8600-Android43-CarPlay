@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.media
 
 import android.media.AudioManager
+import android.os.Build
 
 /** H52 extends AudioManager; discover its public constants rather than assuming stream numbers. */
 data class GeelyAudioCapabilities(val carPlay: Int, val navigationSpeech: Int, val navigationAlert: Int?) {
@@ -15,6 +16,12 @@ data class GeelyAudioCapabilities(val carPlay: Int, val navigationSpeech: Int, v
     companion object {
         fun detect(): GeelyAudioCapabilities? = fromFields { name ->
             runCatching { AudioManager::class.java.getField(name).getInt(null) }.getOrNull()
+        }?.let { profile ->
+            // H53's factory guide uses stream 11. CarPlay alert metadata does not establish that
+            // it is the OEM turn-hint function; retain speech routing instead of guessing 4/25.
+            if (Build.VERSION.SDK_INT == 18 && Build.BOARD == "C3ALFUS" &&
+                Build.DISPLAY == "06.03.08600.H53.00060") profile.copy(navigationAlert = null)
+            else profile
         }
 
         internal fun fromFields(read: (String) -> Int?): GeelyAudioCapabilities? {

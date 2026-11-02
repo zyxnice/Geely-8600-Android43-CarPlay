@@ -52,8 +52,11 @@ internal class AudioFocusCoordinator(
     private class GeelyFocusLease(
         val key: GeelyFocusKey,
         val listener: AudioManager.OnAudioFocusChangeListener,
+        val burstScoped: Boolean,
         val callbackVersion: AtomicInteger = AtomicInteger(),
-    )
+    ) {
+        var interrupted = false
+    }
 
     private val manager = context?.getSystemService(Context.AUDIO_SERVICE) as? AudioManager
     private val active = LinkedHashMap<AudioTrack, Entry>()
@@ -79,9 +82,10 @@ internal class AudioFocusCoordinator(
     }
 
     @Synchronized
-    fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?, legacyStreamType: Int) {
+    fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?, legacyStreamType: Int,
+        burstScoped: Boolean = false) {
         if (separateGeelyFocus) {
-            acquireGeely(track, channel, legacyStreamType)
+            acquireGeely(track, channel, legacyStreamType, burstScoped)
             return
         }
         if (!enabled || manager == null || channel == AudioChannel.NAVIGATION) return
@@ -92,9 +96,10 @@ internal class AudioFocusCoordinator(
     }
 
     @Synchronized
-    fun acquireLegacy(track: AudioTrack, channel: AudioChannel, streamType: Int) {
+    fun acquireLegacy(track: AudioTrack, channel: AudioChannel, streamType: Int,
+        burstScoped: Boolean = false) {
         if (separateGeelyFocus) {
-            acquireGeely(track, channel, streamType)
+            acquireGeely(track, channel, streamType, burstScoped)
             return
         }
         if (!enabled || channel == AudioChannel.NAVIGATION) return
@@ -120,7 +125,8 @@ internal class AudioFocusCoordinator(
     }
 
     @Suppress("DEPRECATION")
-    private fun acquireGeely(track: AudioTrack, channel: AudioChannel, streamType: Int) {
+    private fun acquireGeely(track: AudioTrack, channel: AudioChannel, streamType: Int,
+        burstScoped: Boolean) {
         if (!enabled) return
         val key = GeelyFocusKey(channel, streamType)
         val oldKey = geelyTracks[track]
@@ -129,6 +135,12 @@ internal class AudioFocusCoordinator(
         geelyTracks[track] = key
         geelyListeners[key]?.let {
             setGeelyChannelVolume(key, geelyVolumes[key] ?: FULL_VOLUME)
+            return
+        }
+        // Another renderer can join a denied burst. Keep it muted rather than issuing another
+        // request over the same call/vehicle prompt; the last track's release clears this state.
+        if (burstScoped && geelyVolumes.containsKey(key)) {
+            setGeelyChannelVolume(key, MUTED_VOLUME)
             return
         }
         // A stream is silent until AudioService grants focus. This prevents a rejected vendor
@@ -144,7 +156,7 @@ internal class AudioFocusCoordinator(
         val focus = AudioManager.OnAudioFocusChangeListener { change ->
             handleGeelyFocusChange(key, lease, change)
         }
-        lease = GeelyFocusLease(key, focus)
+        lease = GeelyFocusLease(key, focus, burstScoped)
         // Install identity before requesting focus: an OEM may dispatch a callback immediately.
         geelyListeners[key] = lease
         val gain = when (channel) {
@@ -183,9 +195,15 @@ internal class AudioFocusCoordinator(
             return
         }
         lease.callbackVersion.incrementAndGet()
+        if (lease.burstScoped && (change == AudioManager.AUDIOFOCUS_LOSS ||
+                change == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT)) {
+            // Consume this burst silently after interruption. A later GAIN must not replay
+            // queued old directions; only PCM in a later burst acquires a fresh lease.
+            lease.interrupted = true
+        }
         val volume = when (change) {
-            AudioManager.AUDIOFOCUS_GAIN -> FULL_VOLUME
-            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> DUCKED_VOLUME
+            AudioManager.AUDIOFOCUS_GAIN -> if (lease.interrupted) MUTED_VOLUME else FULL_VOLUME
+            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> if (lease.interrupted) MUTED_VOLUME else DUCKED_VOLUME
             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT,
             AudioManager.AUDIOFOCUS_LOSS -> MUTED_VOLUME
             else -> return
@@ -1169,6 +1187,7 @@ private class AudioRenderer(
     private val bufferProgress = AudioBufferProgress(if (format.channels >= 2) 4 else 2)
     private var underrunsAtPlaybackStart = 0
     private var lastPcmWriteNs = 0L
+    private val navigationBurst = NavigationAudioBurstPolicy()
     private var rebufferCount = 0
     private val thread = Thread(::run, "carplay-audio").apply { isDaemon = true }
 
@@ -1215,7 +1234,7 @@ private class AudioRenderer(
                 AudioCodecKind.LPCM -> Unit
             }
             createTrack()
-            requestAudioFocus()
+            if (!usesNavigationBurstFocus()) requestAudioFocus()
             while (running) {
                 queue.poll(AUDIO_POLL_MILLIS, TimeUnit.MILLISECONDS)?.let(::handle)
                 // Output becomes ready asynchronously, including after the last packet of a burst.
@@ -1402,8 +1421,8 @@ private class AudioRenderer(
     )
 
     /**
-     * Shares a sink-level focus request across all active non-navigation renderers.
-     * Navigation guidance intentionally takes no focus: it overlays media without ducking it.
+     * Shares focus at the sink level. Geely's dedicated navigation tracks request only while
+     * consuming a PCM burst; ordinary navigation keeps its existing focus-free overlay.
      */
     private fun requestAudioFocus() {
         val channel = mappedChannel ?: return
@@ -1414,10 +1433,17 @@ private class AudioRenderer(
         val currentTrack = track ?: return
         val attributes = trackAttributes
         if (attributes == null && !modernAudioSupported) {
-            audioFocusCoordinator.acquireLegacy(currentTrack, channel, legacyTrackStreamType)
+            audioFocusCoordinator.acquireLegacy(currentTrack, channel, legacyTrackStreamType, usesNavigationBurstFocus())
         } else {
-            audioFocusCoordinator.acquire(currentTrack, channel, attributes, legacyTrackStreamType)
+            audioFocusCoordinator.acquire(currentTrack, channel, attributes, legacyTrackStreamType, usesNavigationBurstFocus())
         }
+    }
+
+    private fun usesNavigationBurstFocus(): Boolean {
+        val capabilities = geelyAudio ?: return false
+        return mappedChannel == AudioChannel.NAVIGATION &&
+            (legacyTrackStreamType == capabilities.navigationSpeech ||
+                legacyTrackStreamType == capabilities.navigationAlert)
     }
 
     private fun abandonAudioFocus() {
@@ -1604,6 +1630,10 @@ private class AudioRenderer(
 
     private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
         val track = track ?: return
+        if (length > 0 && usesNavigationBurstFocus() && navigationBurst.onPcm(System.nanoTime())) {
+            report("Audio: navigation PCM burst started stream=$legacyTrackStreamType; requesting focus")
+            requestAudioFocus()
+        }
         if (!firstPcmLogged && length > 0) {
             firstPcmLogged = true
             val end = minOf(data.size, offset + minOf(length, 16))
@@ -1674,6 +1704,12 @@ private class AudioRenderer(
         if (!playbackStarted && prebufferBytes > 0 && queue.isEmpty() &&
             System.nanoTime() - lastPcmWriteNs >= BUFFER_TAIL_WAIT_NS) {
             startPlayback(track)
+        }
+        if (usesNavigationBurstFocus() && navigationBurst.releaseIfIdle(
+                System.nanoTime(), bufferProgress.queuedBytes(track.playbackHeadPosition),
+                queue.isEmpty(), lastArrivalNs.get())) {
+            abandonAudioFocus()
+            report("Audio: navigation PCM burst drained stream=$legacyTrackStreamType quietMs=500; focus released")
         }
     }
 

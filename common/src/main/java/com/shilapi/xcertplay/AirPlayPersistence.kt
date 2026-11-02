@@ -156,8 +156,12 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_AUDIO_FOCUS_ENABLED, false)
 
+    // Only the verified 8600 variant/platform opts in by default; retain an explicit user choice.
     fun loadGeelyAudioRouting(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("geely_h52_audio_routing", false)
+        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean(
+            "geely_h52_audio_routing",
+            com.shilapi.xcertplay.hud.GeelyHudTrialSettings.available(context),
+        )
 
     fun saveGeelyAudioRouting(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

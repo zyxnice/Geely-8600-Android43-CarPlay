@@ -485,7 +485,8 @@
     <string name="geely_audio_alert">Media 23 + speech 11; alert sounds 25</string>
     <string name="geely_audio_unavailable">H52 audio extensions not detected. Use generic routing.</string>
     <string name="geely_audio_detected">H52 extensions detected: CarPlay 23, navigation speech 11.</string>
-    <string name="geely_audio_hint">H52 routing overrides custom media/navigation channels and uses independent audio focus. Speech stays on 11; optional alert sounds use 25. The vendor alert constant needs vehicle testing. Reconnect after changes. Actual sound and mixing require a vehicle test.</string>
+    <string name="geely_audio_hint">Factory routing uses separate music and navigation volume. On 8600, guidance and alerts share the navigation route. Navigation focus is released after playback drains and a short quiet interval. Reconnect after changing the profile; sound and mixing require vehicle testing.</string>
+    <string name="geely_navigation_volume">Factory navigation volume</string>
     <string name="geely_audio_preview">Test H52 audio channels</string>
     <string name="geely_audio_test_media">CarPlay media (23)</string>
     <string name="geely_audio_test_speech">Navigation speech (11)</string>

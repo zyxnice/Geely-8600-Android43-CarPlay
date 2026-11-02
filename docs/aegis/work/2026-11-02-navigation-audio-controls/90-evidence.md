@@ -21,3 +21,15 @@
 第一步最终构建成功：827项测试，824通过、3项既有JNI跳过、0失败。三个APK检查和独立SharedPreferences正常入口测试通过；新APK SHA-256 `f86e7af010a25630b1d173f35896ec74b465d1eefdce51b160db9c4d09e8333d`。新默认包尚未安装，本段不将旧包人工选择配置的有声反馈当作新默认值已装车验收。
 
 提交前的完整暂存diff空白检查发现Concentus原样源码中既有行尾空白与空格/Tab缩进告警；保留第三方归档字节一致性，不对库做无关格式化。排除该第三方目录的自有代码/文档diff空白检查通过；公开树凭据扫描通过。默认修订包已上传OSS并完整匿名下载，SHA一致。
+
+## 第二步：独立混音开关
+
+第一步已推送main `db4677d391e788c53a5fc2b080a8be55d48278df` 后才开始实现第二步。设置缺省false，普通保存/读取、Host恢复/新Intent加载、重建sink均传递该值；设置变化沿现有正常连接入口重连。
+
+关闭降音时仅改变焦点归属：导航AudioTrack仍11，复用MEDIA23租约；开启时仍独立NAV11 MAY_DUCK。共享租约由最后一轨释放，电话/外部焦点丢失仍控制两轨音量。独立复核指出“PHONE/ASSISTANT先持有，再开始NAV”的反序风险，已增加明确deferred请求和反序回归；外部拒绝不自动进入deferred，最后中断轨释放才恢复仍活跃的deferred媒体请求。sink关闭先关闭Coordinator，禁止新acquire和恢复deferred，后续release继续清理。
+
+用户明确“先备好新包，暂不安装”，本轮后续不操作车机。当前车机仍为3b3867及已保存的原厂有声配置；混音开关、共同播放不主动降音及来电实际恢复均待新包实车测试。最终构建与OSS核验结果后续追加。
+
+最终混音候选构建成功：836项测试，833通过、3项既有JNI跳过、0失败/错误，三个既有APK检查通过。新的独立复核者随后在最终源码按正常Coordinator/AudioManager和SharedPreferences入口独立执行8项focus+2项preference测试，10项全通过；相关日志在本地`output/navigation-mix-20261102/reviewer-mix-entry-tests.log`。该targeted复跑会刷新测试XML，完整836统计以首次最终全量build.log和receipt为准。
+
+最终APK SHA-256：`eaf488758e6f38efa4669a83488b78c7c10e4254033a71e378acf396a5c32028`，11,849,029字节。OSS上传200、匿名完整下载200，大小及SHA一致：[混音开关测试包](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-navigation-mix-20261102-eaf488758e6f.apk)。本轮未安装；[ADR-0008](../../../adr/ADR-0008-navigation-mix-focus.md)记录焦点归属、替代方案及撤销条件。

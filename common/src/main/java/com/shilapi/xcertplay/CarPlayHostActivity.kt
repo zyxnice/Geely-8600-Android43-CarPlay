@@ -332,6 +332,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMapping = false
     private var geelyAudioRouting = false
     private var geelyNavigationAlert = false
+    private var navigationDuckingEnabled = false
     private var geelyBluetoothEnabled = false
     private var navigationStreamType = 14
     private var debugLogsEnabled = false
@@ -538,6 +539,7 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         geelyAudioRouting = AirPlayPersistence.loadGeelyAudioRouting(this)
         geelyNavigationAlert = AirPlayPersistence.loadGeelyNavigationAlert(this)
+        navigationDuckingEnabled = AirPlayPersistence.loadNavigationDuckingEnabled(this)
         geelyBluetoothEnabled = AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this)
         navigationStreamType = AirPlayPersistence.loadNavigationStreamType(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
@@ -804,9 +806,12 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun reloadGeelyAudioSettingsIfChanged(): Boolean {
         val routing = AirPlayPersistence.loadGeelyAudioRouting(this)
         val alert = AirPlayPersistence.loadGeelyNavigationAlert(this)
-        if (routing == geelyAudioRouting && alert == geelyNavigationAlert) return false
+        val ducking = AirPlayPersistence.loadNavigationDuckingEnabled(this)
+        if (routing == geelyAudioRouting && alert == geelyNavigationAlert &&
+            ducking == navigationDuckingEnabled) return false
         geelyAudioRouting = routing
         geelyNavigationAlert = alert
+        navigationDuckingEnabled = ducking
         return true
     }
 
@@ -2005,6 +2010,7 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveAdvancedAudioChannelMapping(this, advancedAudioChannelMapping)
         AirPlayPersistence.saveGeelyAudioRouting(this, geelyAudioRouting)
         AirPlayPersistence.saveGeelyNavigationAlert(this, geelyNavigationAlert)
+        AirPlayPersistence.saveNavigationDuckingEnabled(this, navigationDuckingEnabled)
         AirPlayPersistence.saveDisplayScaleTenths(this, displayScaleTenths)
         AirPlayPersistence.saveFps(this, fps)
         AirPlayPersistence.saveWidthPhysicalMm(this, widthPhysicalMm)
@@ -3488,6 +3494,7 @@ class CarPlayHostActivity : ComponentActivity() {
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
             geelyAudioRouting = geelyAudioRouting,
             geelyNavigationAlert = geelyNavigationAlert,
+            navigationDuckingEnabled = navigationDuckingEnabled,
             context = this,
             navigationStreamType = navigationStreamType,
             onScreenStreamActiveChanged = { type, active ->
@@ -4028,7 +4035,8 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!validateManualHotspotSettings()) return
         val h52AudioChanged =
             AirPlayPersistence.loadGeelyAudioRouting(this) != geelyAudioRouting ||
-                AirPlayPersistence.loadGeelyNavigationAlert(this) != geelyNavigationAlert
+                AirPlayPersistence.loadGeelyNavigationAlert(this) != geelyNavigationAlert ||
+                AirPlayPersistence.loadNavigationDuckingEnabled(this) != navigationDuckingEnabled
         persistMenuSettings()
         settingsBaseline = null
         finishSettingsMenu("Settings saved", restartForAudioChange = h52AudioChanged)

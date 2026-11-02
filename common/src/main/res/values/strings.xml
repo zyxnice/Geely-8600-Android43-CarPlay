@@ -544,4 +544,6 @@
     <string name="geely_hud_trial_title">Geely HUD navigation trial</string>
     <string name="geely_hud_trial_toggle">Show phone navigation on HUD</string>
     <string name="geely_hud_trial_description">Enabled by default; manual OFF is remembered. Valid CarPlay navigation is sent directly to the HUD without checking factory navigation state.</string>
+    <string name="navigation_ducking_title">Lower music during navigation prompts</string>
+    <string name="navigation_ducking_description">Off by default: play navigation with music without requesting lower music volume. Calls and system prompts still follow the head unit audio policy. Changing this reconnects CarPlay.</string>
 </resources>

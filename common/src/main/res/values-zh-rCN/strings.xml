@@ -544,4 +544,6 @@
     <string name="geely_hud_trial_title">吉利 HUD 导航试验</string>
     <string name="geely_hud_trial_toggle">将手机导航显示到 HUD</string>
     <string name="geely_hud_trial_description">默认开启，记住手动关闭。CarPlay 提供有效导航数据后直接发送到 HUD，不检查原车导航状态。</string>
+    <string name="navigation_ducking_title">导航播报时压低音乐</string>
+    <string name="navigation_ducking_description">默认关闭：导航与音乐共同播放，不主动请求降低音乐音量。来电和系统提示仍按车机音频策略处理。修改后会重新连接 CarPlay。</string>
 </resources>

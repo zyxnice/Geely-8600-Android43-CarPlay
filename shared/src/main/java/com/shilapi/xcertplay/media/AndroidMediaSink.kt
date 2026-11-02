@@ -45,6 +45,8 @@ internal class AudioFocusCoordinator(
     private val enabled: Boolean,
     private val report: (String) -> Unit = {},
     private val separateGeelyFocus: Boolean = false,
+    private val navigationDuckingEnabled: Boolean = true,
+    private val geelyMediaStreamType: Int = AudioManager.STREAM_MUSIC,
 ) {
     // AudioAttributes/AudioFocusRequest are absent on Android 4.3; keep them as Any and reflect.
     private data class Entry(val channel: AudioChannel, val attributes: Any)
@@ -66,6 +68,8 @@ internal class AudioFocusCoordinator(
     private val geelyTracks = LinkedHashMap<AudioTrack, GeelyFocusKey>()
     private val geelyListeners = LinkedHashMap<GeelyFocusKey, GeelyFocusLease>()
     private val geelyVolumes = LinkedHashMap<GeelyFocusKey, Float>()
+    private val deferredGeelyFocus = LinkedHashSet<GeelyFocusKey>()
+    private var closed = false
     private val listener = AudioManager.OnAudioFocusChangeListener { change ->
         synchronized(this) {
             runCatching { report("Audio: focus change=$change activeTracks=${active.size}") }
@@ -80,6 +84,7 @@ internal class AudioFocusCoordinator(
 
     @Synchronized
     fun acquire(track: AudioTrack, channel: AudioChannel, attributes: Any?, legacyStreamType: Int) {
+        if (closed) return
         if (separateGeelyFocus) {
             acquireGeely(track, channel, legacyStreamType)
             return
@@ -93,6 +98,7 @@ internal class AudioFocusCoordinator(
 
     @Synchronized
     fun acquireLegacy(track: AudioTrack, channel: AudioChannel, streamType: Int) {
+        if (closed) return
         if (separateGeelyFocus) {
             acquireGeely(track, channel, streamType)
             return
@@ -107,6 +113,7 @@ internal class AudioFocusCoordinator(
     fun release(track: AudioTrack) {
         val geelyKey = geelyTracks.remove(track)
         if (geelyKey != null && geelyTracks.values.none { it == geelyKey }) {
+            deferredGeelyFocus.remove(geelyKey)
             geelyVolumes.remove(geelyKey)
             geelyListeners.remove(geelyKey)?.let { lease ->
                 runCatching { manager?.abandonAudioFocus(lease.listener) }
@@ -115,18 +122,41 @@ internal class AudioFocusCoordinator(
                 }
             }
         }
+        if (!closed && geelyKey?.channel in setOf(AudioChannel.PHONE, AudioChannel.ASSISTANT) &&
+            !hasGeelyInterruption()) {
+            // Resume only requests explicitly deferred by an in-app call/assistant, never a
+            // denied external focus request. Live tracks retain ownership under this same lock.
+            deferredGeelyFocus.toList().forEach { key ->
+                if (geelyTracks.values.any { it == key }) requestGeelyFocus(key)
+            }
+        }
         if (legacyOnlyTracks.remove(track) != null) refreshLegacyFocus()
         if (active.remove(track) != null) refreshRequest()
+    }
+
+    /** Renderer cleanup may arrive in any order; session shutdown must never resume deferred audio. */
+    @Synchronized fun close() {
+        closed = true
+        deferredGeelyFocus.clear()
     }
 
     @Suppress("DEPRECATION")
     private fun acquireGeely(track: AudioTrack, channel: AudioChannel, streamType: Int) {
         if (!enabled) return
-        val key = GeelyFocusKey(channel, streamType)
+        // Mixing navigation borrows the existing media lease, but its AudioTrack still outputs
+        // on the navigation stream. One lease avoids a self-induced CAN_DUCK callback and still
+        // mutes both tracks when a call/system prompt takes media focus.
+        val sharesMediaFocus = channel == AudioChannel.NAVIGATION && !navigationDuckingEnabled
+        val key = if (sharesMediaFocus) GeelyFocusKey(AudioChannel.MEDIA, geelyMediaStreamType)
+            else GeelyFocusKey(channel, streamType)
         val oldKey = geelyTracks[track]
         if (oldKey == key) return
         if (oldKey != null) release(track)
         geelyTracks[track] = key
+        if (sharesMediaFocus) runCatching {
+            report("Audio: navigation mix outputStream=$streamType focusStream=${key.streamType} " +
+                "duckNavigation=false sharesMediaFocus=true")
+        }
         geelyListeners[key]?.let {
             setGeelyChannelVolume(key, geelyVolumes[key] ?: FULL_VOLUME)
             return
@@ -135,9 +165,27 @@ internal class AudioFocusCoordinator(
         // stream from continuing over a call, reversing alert, or another system prompt.
         if (!geelyVolumes.containsKey(key)) geelyVolumes[key] = MUTED_VOLUME
         setGeelyChannelVolume(key, geelyVolumes[key] ?: MUTED_VOLUME)
+        if (!navigationDuckingEnabled && key.channel == AudioChannel.MEDIA && hasGeelyInterruption()) {
+            deferredGeelyFocus.add(key)
+            runCatching { report("Audio: shared media focus deferred during phone/assistant; route muted") }
+            return
+        }
+        requestGeelyFocus(key)
+    }
+
+    private fun hasGeelyInterruption(): Boolean = geelyTracks.values.any {
+        it.channel == AudioChannel.PHONE || it.channel == AudioChannel.ASSISTANT
+    }
+
+    @Suppress("DEPRECATION")
+    private fun requestGeelyFocus(key: GeelyFocusKey) {
+        deferredGeelyFocus.remove(key)
         val service = manager
         if (service == null) {
-            runCatching { report("Audio: Geely focus unavailable channel=$channel stream=$streamType; route muted") }
+            runCatching {
+                report("Audio: Geely focus unavailable channel=${key.channel} stream=${key.streamType}; " +
+                    "route muted")
+            }
             return
         }
         lateinit var lease: GeelyFocusLease
@@ -147,25 +195,27 @@ internal class AudioFocusCoordinator(
         lease = GeelyFocusLease(key, focus)
         // Install identity before requesting focus: an OEM may dispatch a callback immediately.
         geelyListeners[key] = lease
-        val gain = when (channel) {
+        val gain = when (key.channel) {
             AudioChannel.MEDIA -> AudioManager.AUDIOFOCUS_GAIN
             AudioChannel.NAVIGATION -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK
             AudioChannel.PHONE, AudioChannel.ASSISTANT -> AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
         }
         val versionBeforeRequest = lease.callbackVersion.get()
-        val result = runCatching { service.requestAudioFocus(focus, streamType, gain) }
+        val result = runCatching { service.requestAudioFocus(focus, key.streamType, gain) }
             .getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
         if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
             // Do not overwrite a loss callback that raced with requestAudioFocus's return.
             if (lease.callbackVersion.get() == versionBeforeRequest) setGeelyChannelVolume(key, FULL_VOLUME)
             runCatching {
-                report("Audio: Geely focus requested channel=$channel stream=$streamType gain=$gain granted=true")
+                report("Audio: Geely focus requested channel=${key.channel} stream=${key.streamType} " +
+                    "gain=$gain granted=true")
             }
         } else {
             if (geelyListeners[key] === lease) geelyListeners.remove(key)
             setGeelyChannelVolume(key, MUTED_VOLUME)
             runCatching {
-                report("Audio: Geely focus denied channel=$channel stream=$streamType gain=$gain; route muted")
+                report("Audio: Geely focus denied channel=${key.channel} stream=${key.streamType} " +
+                    "gain=$gain; route muted")
             }
         }
     }
@@ -332,6 +382,8 @@ class AndroidMediaSink(
     private val onMediaAudioChanged: (Boolean) -> Unit = {},
     /** Same immutable local options as the controller's AirPlayConfig. */
     private val performance: com.shilapi.xcertplay.compat.GeelyMediaOptions = com.shilapi.xcertplay.compat.GeelyMediaOptions(),
+    /** True keeps separate ducking focus; false shares media focus while retaining the OEM output route. */
+    private val navigationDuckingEnabled: Boolean = true,
 ) : MediaSink {
     private val appContext = context?.applicationContext
     private val audioManager = appContext?.systemService(AudioManager::class.java, "audio")
@@ -341,6 +393,8 @@ class AndroidMediaSink(
         audioFocusEnabled || geelyAudio != null,
         onAudioDiagnostic,
         separateGeelyFocus = geelyAudio != null,
+        navigationDuckingEnabled = navigationDuckingEnabled,
+        geelyMediaStreamType = geelyAudio?.carPlay ?: AudioManager.STREAM_MUSIC,
     )
     private val screenStateLock = Any()
     private val activeScreenTypes = mutableSetOf<Int>()
@@ -554,6 +608,7 @@ class AndroidMediaSink(
     }
 
     fun close() {
+        audioFocusCoordinator.close()
         synchronized(screenStateLock) {
             activeScreenTypes.forEach { screenStreamActiveChanged?.invoke(it, false) }
             activeScreenTypes.clear()
@@ -1411,8 +1466,8 @@ private class AudioRenderer(
     )
 
     /**
-     * Shares a sink-level focus request across all active non-navigation renderers.
-     * Navigation guidance intentionally takes no focus: it overlays media without ducking it.
+     * Generic navigation overlays without requesting focus. Verified Geely output keeps focus
+     * ownership for system interruptions; its preference selects a separate or shared media lease.
      */
     private fun requestAudioFocus() {
         val channel = mappedChannel ?: return

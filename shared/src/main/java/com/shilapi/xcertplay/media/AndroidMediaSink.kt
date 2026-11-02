@@ -1136,6 +1136,7 @@ private class AudioRenderer(
     @Volatile private var running = true
     @Volatile private var started = false
     private var codec: MediaCodec? = null
+    private var softwareOpus: LegacyOpusDecoder? = null
     private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
@@ -1211,7 +1212,15 @@ private class AudioRenderer(
         try {
             when (format.codec) {
                 AudioCodecKind.AAC_LC -> configureCodec(MediaFormat.MIMETYPE_AUDIO_AAC)
-                AudioCodecKind.OPUS -> configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
+                AudioCodecKind.OPUS -> {
+                    if (Build.VERSION.SDK_INT < 21) {
+                        softwareOpus = LegacyOpusDecoder(format.sampleRate, format.channels, report)
+                        report("Audio: software Opus initialized sdk=${Build.VERSION.SDK_INT} " +
+                            "rate=${format.sampleRate} channels=${format.channels}")
+                    } else {
+                        configureCodec(MediaFormat.MIMETYPE_AUDIO_OPUS)
+                    }
+                }
                 AudioCodecKind.LPCM -> Unit
             }
             createTrack()
@@ -1509,6 +1518,18 @@ private class AudioRenderer(
             }
             AudioCodecKind.OPUS -> {
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
+                val software = softwareOpus
+                if (software != null) {
+                    // Valid Opus DTX/short packets must reach the decoder, including 1..3 bytes.
+                    val bytes = software.decode(accessUnit)
+                    if (bytes > 0) {
+                        outputBuffers++
+                        writePcm(software.pcm, 0, bytes)
+                    } else if (accessUnit.isNotEmpty()) {
+                        inputDropped++
+                    }
+                    return
+                }
                 if (accessUnit.size < MIN_OPUS_PACKET_BYTES) {
                     if (!firstOpusShortPacketLogged) {
                         firstOpusShortPacketLogged = true
@@ -1695,6 +1716,7 @@ private class AudioRenderer(
         val queuedFrames = playbackHeadFrames?.let { (totalWrittenFrames - it).coerceAtLeast(0L) }
         val line = "audio stats audioType=${format.audioType} channel=$mappedChannel " +
             "routeType=${currentTrack?.let { PortableAudio.routedDeviceType(it) } ?: -1} codec=${format.codec} " +
+            "decoder=${if (softwareOpus != null) "software-opus" else if (codec != null) "MediaCodec" else "pcm"} " +
             "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
             "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
             "trackBufferFrames=${currentTrack?.let { PortableAudio.bufferSizeInFrames(it) } ?: -1} " +
@@ -1743,6 +1765,8 @@ private class AudioRenderer(
 
     @Synchronized
     private fun release() {
+        // Instance state is owned by this renderer only; a new stream starts with a new decoder.
+        softwareOpus = null
         abandonAudioFocus()
         val codec = codec
         this.codec = null

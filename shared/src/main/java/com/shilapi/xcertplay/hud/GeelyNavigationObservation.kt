@@ -32,6 +32,8 @@ internal class GeelyNavigationObservation internal constructor(log: (String) -> 
     private var failed = false
     private var clockStarted = false
     private var output: GeelyHudTrialOutput? = null
+    private var ingressFrames = 0L
+    private var lastIngressReportNs: Long? = null
 
     private fun attachOutput(trial: GeelyHudTrialOutput) {
         output = trial
@@ -57,6 +59,8 @@ internal class GeelyNavigationObservation internal constructor(log: (String) -> 
         }
         ownerRun = connectionGeneration
         val token = ++generation
+        ingressFrames = 0
+        lastIngressReportNs = null
         submit { observer.beginChannel(token) }
         return token
     }
@@ -66,8 +70,22 @@ internal class GeelyNavigationObservation internal constructor(log: (String) -> 
         // Other CSM consumers keep running even if optional observation has failed closed.
         if (frame.messageId != Iap2RouteState.ROUTE_GUIDANCE_UPDATE &&
             frame.messageId != Iap2RouteState.ROUTE_GUIDANCE_MANEUVER_UPDATE) return true
+        ingressFrames++
+        val receivedNs = System.nanoTime()
+        val previous = lastIngressReportNs
+        var ingressReport: String? = null
+        if (previous == null || receivedNs - previous >= 5_000_000_000L) {
+            lastIngressReportNs = receivedNs
+            ingressReport = "geely navigation ingress channel=$channel frames=$ingressFrames " +
+                "messageId=${frame.messageId} bytes=${frame.payload.size} receivedNs=$receivedNs " +
+                "queued=${worker.queue.size} failed=$failed"
+        }
         submit {
-            if (isCurrent(channel)) observer.accept(channel, frame)
+            if (isCurrent(channel)) {
+                // Log on the observer worker, never on the phone's control receiver.
+                ingressReport?.let(diagnostic)
+                observer.accept(channel, frame)
+            }
         }
         return true
     }

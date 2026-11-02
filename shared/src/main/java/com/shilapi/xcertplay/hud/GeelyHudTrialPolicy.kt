@@ -7,18 +7,15 @@ internal interface GeelyHudTrialPort {
     fun end()
 }
 
-/** WAITING preserves the requested switch without granting ownership of unknown factory state. */
-internal enum class GeelyHudFactoryReadiness { READY, WAITING, BLOCKED }
-
 /**
- * One explicitly enabled controller's experimental output. All calls are serialized; no queued
- * guidance survives a source handoff. Observed navigation evidence is not atomic ownership.
+ * One enabled controller's output. All calls are serialized; the user selects CarPlay as the sole
+ * navigation source. Factory navigation state is intentionally outside this policy.
  */
 internal class GeelyHudTrialPolicy(
     private val port: GeelyHudTrialPort,
     private val enabled: () -> Boolean,
     private val revoke: () -> Unit,
-    private val factoryReadiness: () -> GeelyHudFactoryReadiness,
+    private val receiverReady: () -> Boolean,
     private val log: (String) -> Unit,
     private val nanoTime: () -> Long = System::nanoTime,
     private val status: (GeelyHudTrialStatus) -> Unit = {},
@@ -28,6 +25,8 @@ internal class GeelyHudTrialPolicy(
     private var failed = false
     private var closed = false
     private var clearAttempts = 0
+    private var guidanceDispatches = 0L
+    private var lastGuidanceReportNs: Long? = null
 
     @Synchronized fun update(frame: GeelyNavigationFrame?) {
         if (closed) return
@@ -35,22 +34,15 @@ internal class GeelyHudTrialPolicy(
         if (failed && enabled()) {
             revoke()
             status(GeelyHudTrialStatus.RECONNECT_REQUIRED)
-            log("geely HUD trial remains disabled until a new controller after conflict or output failure")
+            log("geely HUD trial remains disabled until a new controller after receiver or output failure")
         }
-        when (factoryReadiness()) {
-            GeelyHudFactoryReadiness.WAITING -> {
-                status(GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN)
-                return
-            }
-            GeelyHudFactoryReadiness.BLOCKED -> {
-                abandon("factory-active-or-unverified")
-                return
-            }
-            GeelyHudFactoryReadiness.READY -> Unit
+        if (!receiverReady()) {
+            abandon("receiver-unverified")
+            return
         }
-        if (failed || !enabled() || !fresh(frame)) {
+        if (failed || !enabled() || !publishable(frame)) {
             if (!failed && enabled() && ownsOutput) status(GeelyHudTrialStatus.STALE)
-            clearOwned(if (failed) "output-failed" else if (!enabled()) "disabled" else "no-fresh-guidance")
+            clearOwned(if (failed) "output-failed" else if (!enabled()) "disabled" else "route-unavailable-or-invalid")
             return
         }
         try {
@@ -64,6 +56,14 @@ internal class GeelyHudTrialPolicy(
                 port.guidance(requireNotNull(frame))
                 lastFrame = frame
                 status(GeelyHudTrialStatus.SENT)
+                guidanceDispatches++
+                val now = nanoTime()
+                if (lastGuidanceReportNs?.let { now - it >= 5_000_000_000L } != false) {
+                    lastGuidanceReportNs = now
+                    log("geely HUD trial guidance dispatched count=$guidanceDispatches nowNs=$now " +
+                        "distanceUpdatedNs=${frame.distanceUpdatedNanos} fields=${frame.candidateFields()}; " +
+                        "receiver acknowledgement unavailable")
+                }
             }
         } catch (error: Exception) {
             failed = true
@@ -74,51 +74,36 @@ internal class GeelyHudTrialPolicy(
         }
     }
 
-    /** Another broadcast source takes precedence. Never clear a newly adopted factory route. */
-    @Synchronized fun foreignNavigation() {
-        if (!closed && (ownsOutput || enabled())) {
-            abandon("other-navigation-source")
-            status(GeelyHudTrialStatus.SOURCE_CHANGED)
-        }
-    }
-
-    /** The shared receiver was cleared by an external end; rebuild only a still-consented trial. */
-    @Synchronized fun foreignNavigationEnded() {
-        if (closed || !ownsOutput) return
-        ownsOutput = false
-        lastFrame = null
-        clearAttempts = 0
-        // Do not grant consent or erase a prior conflict/failure. update() still checks all guards.
-        log("geely HUD factory navigation ended; owned output will require a fresh begin")
-    }
-
     @Synchronized fun close() {
         if (closed) return
         revoke()
         if (ownsOutput) {
-            if (factoryReadiness() == GeelyHudFactoryReadiness.READY) clearOwned("controller-closed") else abandon("factory-active-on-close")
+            if (receiverReady()) clearOwned("controller-closed") else abandon("receiver-unverified-on-close")
         }
         closed = true
     }
 
-    private fun fresh(frame: GeelyNavigationFrame?): Boolean {
+    private fun publishable(frame: GeelyNavigationFrame?): Boolean {
         val updated = frame?.distanceUpdatedNanos ?: return false
         val age = nanoTime() - updated
-        // This is an application-side expiry, not an assertion about the physical HUD's TTL.
-        return age in 0 until 5_000_000_000L &&
+        // The decoder owns route validity, maneuver changes and whole-stream timeout. A stale
+        // distance alone must not end and restart a still-valid navigation session.
+        return age >= 0 &&
             frame.road.toByteArray(charset("GB2312")).size <= 80
     }
 
     private fun clearOwned(reason: String) {
         if (!ownsOutput || clearAttempts >= 3) return
-        // Recheck immediately before a clear; do not overwrite a known factory takeover.
-        if (factoryReadiness() != GeelyHudFactoryReadiness.READY) { abandon("factory-active-before-clear"); return }
+        // Identity must still match before an end broadcast, including retries after send failure.
+        if (!receiverReady()) { abandon("receiver-unverified-before-clear"); return }
         clearAttempts++
         try {
             port.end()
             ownsOutput = false
             lastFrame = null
             clearAttempts = 0
+            guidanceDispatches = 0
+            lastGuidanceReportNs = null
             log("geely HUD trial end dispatched reason=$reason; physical clear unverified")
         } catch (error: Exception) {
             failed = true

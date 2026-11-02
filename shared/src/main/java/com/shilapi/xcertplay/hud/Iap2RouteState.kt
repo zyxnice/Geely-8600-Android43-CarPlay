@@ -36,9 +36,23 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     private var remainingMeters: Long? = null
     private var emptyListSinceNs: Long? = null
     private var lastRouteUpdateNs: Long? = null
+    private var distanceFieldsReceived = 0L
+    private var distanceFieldsApplied = 0L
+    private var emptyListDistanceSkips = 0L
+    private var malformedFrames = 0L
+    private var lastParse = "none"
+
+    /** Counts describe this decoder instance, including rejected frames; ticks never increment them. */
+    fun diagnostics(): String = "distanceSeen=$distanceFieldsReceived distanceApplied=$distanceFieldsApplied " +
+        "emptyListDistanceSkips=$emptyListDistanceSkips malformed=$malformedFrames lastParse=$lastParse " +
+        "routeUpdatedNs=$lastRouteUpdateNs distanceUpdatedNs=$lastDistanceUpdateNs activeIndex=$activeIndex"
 
     fun accept(messageId: Int, payload: ByteArray): Iap2RouteChange {
-        if (!validTlvs(payload)) return Iap2RouteChange.NONE
+        if (!validTlvs(payload)) {
+            malformedFrames++
+            lastParse = "malformed"
+            return Iap2RouteChange.NONE
+        }
         return when (messageId) {
             ROUTE_GUIDANCE_UPDATE -> parseRouteUpdate(payload)
             ROUTE_GUIDANCE_MANEUVER_UPDATE -> parseManeuverUpdate(payload)
@@ -46,11 +60,16 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
         }
     }
 
-    fun current(): Iap2RouteManeuver? {
+    fun current(): Iap2RouteManeuver? = snapshot(retainDistance = false)
+
+    /** Geely keeps a known distance for the same live maneuver; route loss and empty-list rules still apply. */
+    fun currentForGeely(): Iap2RouteManeuver? = snapshot(retainDistance = true)
+
+    private fun snapshot(retainDistance: Boolean): Iap2RouteManeuver? {
         val maneuver = activeManeuver() ?: return null
         return Iap2RouteManeuver(distanceMeters, maneuver.type, maneuver.drivingSide,
             roadFor(maneuver), remainingSeconds, remainingMeters, arrivalEpochSeconds,
-            distanceKnown && lastDistanceUpdateNs?.let { nanoTime() - it < STALE_ROUTE_NS } == true,
+            distanceKnown && lastDistanceUpdateNs?.let { retainDistance || nanoTime() - it < STALE_ROUTE_NS } == true,
             maneuver.sideKnown, lastDistanceUpdateNs)
     }
 
@@ -84,6 +103,8 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     private fun roadFor(maneuver: Maneuver): String = maneuver.afterRoad.ifEmpty { currentRoad }
 
     private fun parseRouteUpdate(data: ByteArray): Iap2RouteChange {
+        // A resumed stream cannot revive a distance from before a full route timeout.
+        if (lastRouteUpdateNs?.let { nanoTime() - it >= STALE_ROUTE_NS } == true) distanceKnown = false
         lastRouteUpdateNs = nanoTime()
         var state: Int? = null
         var distance: Long? = null
@@ -98,6 +119,7 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
                 type == 0x07 && valueLength >= 4 -> remainingMeters = u32(data, value)
                 type == 0x0a && valueLength >= 4 -> {
                     distance = u32(data, value)
+                    distanceFieldsReceived++
                 }
                 type == 0x0d -> {
                     listPresent = true
@@ -105,6 +127,8 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
                 }
             }
         }
+
+        lastParse = "route(state=$state,list=$listPresent,index=$firstManeuver,distance=$distance)"
 
         // Only NoRouteSet (0) and Arrived (2) end the route.
         if (state == 0 || state == 2) {
@@ -114,6 +138,7 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
         // maneuver (and the cached 0x5202 details, which are never resent) and hide it only if the list stays
         // empty; the bridges' 1 s tick clears the outputs once current() turns null.
         if (listPresent && firstManeuver == null) {
+            if (distance != null) emptyListDistanceSkips++
             if (emptyListSinceNs == null) emptyListSinceNs = nanoTime()
             return Iap2RouteChange.NONE
         }
@@ -125,6 +150,7 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
             routeActive = true
         }
         if (distance != null) {
+            distanceFieldsApplied++
             distanceMeters = distance!!.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             distanceKnown = activeIndex >= 0 && distance!! <= Int.MAX_VALUE
             lastDistanceUpdateNs = nanoTime()
@@ -133,6 +159,7 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     }
 
     private fun parseManeuverUpdate(data: ByteArray): Iap2RouteChange {
+        lastParse = "maneuver"
         var index: Int? = null
         var type: Int? = null
         var drivingSide: Int? = null

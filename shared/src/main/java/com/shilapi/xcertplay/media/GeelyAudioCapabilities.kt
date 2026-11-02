@@ -13,6 +13,11 @@ data class GeelyAudioCapabilities(val carPlay: Int, val navigationSpeech: Int, v
         }
 
     companion object {
+        /** Default only the verified variant/firmware; saved user choices remain authoritative. */
+        fun defaultsToOemRouting(packageName: String, sdk: Int, board: String, display: String): Boolean =
+            packageName == "com.shihab.diplay.repair1.geely8600" && sdk == 18 &&
+                board == "C3ALFUS" && display == "06.03.08600.H53.00060"
+
         fun detect(): GeelyAudioCapabilities? = fromFields { name ->
             runCatching { AudioManager::class.java.getField(name).getInt(null) }.getOrNull()
         }

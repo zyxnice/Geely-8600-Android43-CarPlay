@@ -1,36 +1,21 @@
 # 8600 CarPlay 导航观测与 HUD 接入进度
 
-## 当前交付（2026-11-01 修订）
+## 当前交付（2026-11-02 修订）
 
-后续默认开启修订：源码默认偏好为ON，手动OFF保存；来源保护、原厂身份及数据新鲜度守卫仍生效。UNKNOWN先等待原车结束证据，或由用户停车确认本次原车未导航；确认不跨控制器重建保留。详见[默认开启记录](aegis/work/2026-11-01-geely-hud-default-on/90-evidence.md)。以下trial2现场反馈与包身份是该修订之前的已装基线，不代表默认开启修订已装车。
+用户明确选择 CarPlay 为唯一导航来源。HUD 默认开启并保存手动 OFF；删除原车状态监听、UNKNOWN 等待及空闲确认入口，不再因原车事件关闭或重新开始 HUD 输出。本次修订的构建、安装及验证以[直接输出记录](aegis/work/2026-11-02-geely-hud-direct-output/90-evidence.md)为准，以下历史版本不代表当前行为。
 
-HUD trial2 已覆盖安装到目标车机，用户本次现场反馈“可以了”；功能代码 `1fbc7cc` 已合入并推送 `main`。实现为**默认关闭、每次应用运行需手动确认的原厂 HUD 试验出口**。本次可用反馈不等于全部图标、原车接管、异常残留与长期稳定性都已验收。当前候选 SHA 和分项状态见[当前状态](GEELY-8600-STATUS.md)。
+数据链路：iAP2 0x5201/0x5202 → Iap2RouteState → GeelyNavigationFrame → GeelyHudTrialPolicy → 显式原厂 AutoNaviReceiver。不是屏幕视频或倒车影像发送。
 
-构建基线为已装车的 USB两秒r2 + VPN修复 + output3媒体源码。独立构建副本逐文件保留这些文件，不混入工作区output4诊断。包名/versionCode继续保持可同签覆盖，候选以文件名和SHA区分，不卸载清数据。原先安装后关机的要求已由用户取消；安装与调试记录不代表存在持续无人值守操作授权。
+- Settings/Lease：默认 ON，保存手动 OFF；进程内单一 owner，旧任务不能释放新 owner，失败后同控制器不自动复活。
+- Policy：有效路线开始8、导航10001、结束9。用户反馈内容去重无效，已恢复整帧比较；更新时间刷新也重新发送，同一帧的时钟回调不重复发送。5秒有效期、清除后重新开始及最多3次清除重试不变。
+- Output：仅固定API18/C3ALFUS/H53.00060和目标包；保留receiver导出/权限/版本及APK、ODEX哈希核验与通道代次检查。不调用USB特权桥或原始MCU/CAN写HUD。
+- 原厂APK SHA256：39c5da198ec14a1995772d8920dba7ad6859a4350bdb3c4b913db9d2a650322e；ODEX：ce1779e14124d3d55a8300d847b110a97910bceedcd2c517828d5420956ee154。
 
-入口在设置页“吉利 HUD 导航试验”。开启前确认停车/台架、原车导航未在引导及原厂状态变化/残留风险；应用重启不恢复授权。页面每秒同步实际开关和拒绝原因。原车语音绑定和后台自动服务可以启动高德，因此本次修订不再以进程存在作为导航冲突证据。
+原厂开始/结束影响共享导航状态，不是按来源隔离的原子接口。按用户要求不做原车占用保护；原车高德仍可能在后台发送空导航包并覆盖显示，本次不卸载或停止它。强杀、断电和结束失败后的物理恢复仍待验证。
 
-数据链路：iAP2 0x5201/0x5202 → Iap2RouteState → GeelyNavigationFrame → GeelyHudTrialPolicy → **显式**原厂AutoNaviReceiver。Apple也明确HUD应使用iAP2导航元数据，而非截取主屏视频，见[WWDC23](https://developer.apple.com/videos/play/wwdc2023/10150/)及[WWDC25](https://developer.apple.com/videos/play/wwdc2025/216/)。本次实机已收到并解析目标手机的路线、转向、距离和路名；其他手机、导航应用或版本是否提供同样字段仍需分别验证。
+现场曾观测到手机路线约1Hz更新及原厂接收端持续处理零方向/零距离，但这些日志不能独自证明闪烁根因。内容去重修订随后被用户反馈无效并要求撤销；本次恢复原发送方式，不宣称闪烁已解决。
 
-- `GeelyHudTrialSettings/GeelyHudTrialLease`：进程内同意、单一owner，停用后保留互斥直到清理结束；旧关闭任务不能释放新owner。
-- `GeelyHudTrialPolicy`：开始8、实时引导、结束9；独立距离更新时间超过5秒时尝试清除，稳定数据不重复发送。清除失败最多3次，错误在界面与日志保留。这里是应用侧截止时间，不代表物理HUD的自动TTL。
-- `GeelyHudTrialOutput`：仅API18/C3ALFUS/H53.00060固定包启用；同时校验原厂receiver导出/可用/权限、versionCode6/versionName0.6800、APK与ODEX哈希。显式目标不向其他接收器泛发。不调用USB root桥、0x75a车辆透传或MCU/CAN。
-- `GeelyFactoryNavigationState` 根据外源10019的8/10开始、9/12结束和10001的路线证据维护状态。默认空字段不证明导航开始或空闲；已知ACTIVE不因超时消失。未启用试验时记录状态，但不把控制器提前锁死。检测到导航接管后不发送全局结束消息覆盖新路线。
-- 候选回调携带通道代次，交付和每次Binder调用前重新检查；正在执行的Binder不可撤回。没有把输出锁跨到CarPlay控制线程。
-
-### 原厂契约与限制
-
-固件 `AutoNaviReceiver.onReceive`、`AutoNaviRpc.setHud_NL/setNaviStatus` 确认：10019/EXTRA_STATE=8开始，9结束；结束路径清除方向、路名及下一路口距离等。10001使用ICON、SEG_REMAIN_DIS、NEXT_ROAD_NAME、ROUNG_ABOUT_NUM及可选剩余量。开始/结束会触及全局导航状态，不能宣称只影响HUD；不存在按来源原子占有的已核验接口。
-
-原厂APK SHA256：`39c5da198ec14a1995772d8920dba7ad6859a4350bdb3c4b913db9d2a650322e`；ODEX SHA256：`ce1779e14124d3d55a8300d847b110a97910bceedcd2c517828d5420956ee154`。预优化APK单独缺DEX，不能只验APK就推定执行代码相同，因此两者都固定。身份不符则关闭试验，不自动降级特权或绕过守卫。
-
-广播监控与实际发送不是原子操作，也无法发现只向原厂显式发送且不经过本应用的所有其他来源。初始UNKNOWN不等于确认空闲；允许同次人工确认原车未在导航后尝试，不能表述为自动互斥已通过。10001路线证据判据属于受控试验边界，尚未覆盖完整高德协议。强杀、断电、应用被系统杀死及结束发送失败后的物理恢复仍待验证；不自动补发未知来源的全局结束。
-
-### 当前构建与制品
-
-当前源码构建入口见[构建说明](BUILD.md)，本候选使用 `-PgeelyPerformanceStage=B`。装车 trial2 从实装 trial1 源码仅修改 HUD 状态相关九项文件，媒体、USB和VPN保留。817项回归中814通过、3项既有跳过；geelyUsb/debug构建、USB/签名/认证资产及metadata隔离检查通过。导航校验器用 `-Mode Trial`，普通构建用 `-Mode Disabled`。详细结果见[本次安装与反馈](aegis/work/2026-11-01-geely-hud-source-state/90-evidence.md)，[旧trial1记录](aegis/work/2026-10-31-geely-hud-output/90-evidence.md)保留为历史。
-
-下一次停车试验需分别确认真实手机数据、HUD方向/距离/路名、结束和过期清除、原车导航恢复。实际输出保持手动关闭，未经本次人工确认不会发送导航。
+构建从已装默认开启版的精确源码增量生成，保留output3媒体、VPN和USB两秒r2，不混入output4。trial2历史817项回归中814通过、3项跳过；当前修订成绩单独记录，不用历史成绩替代。旧trial2用户“可以了”反馈见[历史记录](aegis/work/2026-11-01-geely-hud-source-state/90-evidence.md)。
 
 ## 历史观测版本边界（2026-10-26）
 

@@ -156,8 +156,14 @@ object AirPlayPersistence {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean(KEY_AUDIO_FOCUS_ENABLED, false)
 
-    fun loadGeelyAudioRouting(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).getBoolean("geely_h52_audio_routing", false)
+    /** Fresh installs use the verified OEM 23/11 profile; an explicit ON or OFF is preserved. */
+    fun loadGeelyAudioRouting(context: Context): Boolean {
+        val capabilities = com.shilapi.xcertplay.media.GeelyAudioCapabilities
+        val defaultEnabled = capabilities.defaultsToOemRouting(context.packageName,
+            Build.VERSION.SDK_INT, Build.BOARD, Build.DISPLAY) && capabilities.detect() != null
+        return context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+            .getBoolean("geely_h52_audio_routing", defaultEnabled)
+    }
 
     fun saveGeelyAudioRouting(context: Context, enabled: Boolean) {
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()

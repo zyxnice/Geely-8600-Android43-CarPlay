@@ -1,13 +1,9 @@
 package com.shilapi.xcertplay.hud
 
-import android.annotation.SuppressLint
-import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
-import android.os.Build
 import java.io.FileInputStream
 import java.security.MessageDigest
 
@@ -15,10 +11,6 @@ import java.security.MessageDigest
  * H53 experiment through the stock exported receiver, never the USB/root bridge or a raw vehicle
  * transport. A successful Android dispatch is not a receiver acknowledgement or HUD acceptance.
  */
-// API18 has no receiver-flags overload; the exact SDK guard rejects every other platform.
-// External active-navigation evidence revokes this trial. Do not upgrade the shared
-// API18 AndroidX baseline solely for a newer registration helper (added in core 1.9).
-@SuppressLint("UnspecifiedRegisterReceiverFlag")
 internal class GeelyHudTrialOutput(
     context: Context,
     private val log: (String) -> Unit,
@@ -26,11 +18,9 @@ internal class GeelyHudTrialOutput(
 ) {
     private val app = context.applicationContext
     private var factoryVerified: Boolean? = null
-    @Volatile private var registered = false
+    private var closed = false
     private val ownerToken = Any()
     private var channel = -1L
-    private val factoryNavigation = GeelyFactoryNavigationState()
-    private var reportedFactoryState: GeelyFactoryNavigationState.Activity? = null
     private val policy = GeelyHudTrialPolicy(
         object : GeelyHudTrialPort {
             override fun begin() = dispatch(mapOf("KEY_TYPE" to 10019, "EXTRA_STATE" to 8), true)
@@ -39,82 +29,35 @@ internal class GeelyHudTrialOutput(
         },
         enabled = { GeelyHudTrialSettings.acquire(app, ownerToken) },
         revoke = { GeelyHudTrialSettings.revoke(ownerToken) },
-        factoryReadiness = ::factoryReadiness,
+        receiverReady = ::receiverReady,
         log = log,
         status = { GeelyHudTrialSettings.report(ownerToken, it) },
     )
-    private val foreignReceiver = object : BroadcastReceiver() {
-        override fun onReceive(context: Context, intent: Intent) {
-            // Our commands are explicit to another package, so they never loop back here.
-            if (registered && intent.action == ACTION) {
-                val keyType = intent.getIntExtra("KEY_TYPE", -1)
-                if (keyType != 10001 && keyType != 10019) return
-                fun optionalInt(key: String) = if (intent.hasExtra(key)) intent.getIntExtra(key, -1) else null
-                val state = factoryNavigation.observe(keyType, optionalInt("EXTRA_STATE"),
-                    optionalInt("ICON"), optionalInt("SEG_REMAIN_DIS"), intent.getStringExtra("NEXT_ROAD_NAME"),
-                    optionalInt("ROUTE_REMAIN_DIS"), optionalInt("ROUTE_REMAIN_TIME"))
-                if (state != reportedFactoryState) {
-                    reportedFactoryState = state
-                    log("geely HUD factory navigation evidence=$state keyType=$keyType state=${optionalInt("EXTRA_STATE")} " +
-                        "icon=${optionalInt("ICON")} segmentMeters=${optionalInt("SEG_REMAIN_DIS")} " +
-                        "remainingMeters=${optionalInt("ROUTE_REMAIN_DIS")} remainingSeconds=${optionalInt("ROUTE_REMAIN_TIME")} " +
-                        "roadPresent=${!intent.getStringExtra("NEXT_ROAD_NAME").isNullOrBlank()}")
-                }
-                if (state == GeelyFactoryNavigationState.Activity.ACTIVE) {
-                    policy.foreignNavigation()
-                } else if (keyType == 10019 && optionalInt("EXTRA_STATE") in setOf(9, 12)) {
-                    policy.foreignNavigationEnded()
-                }
-            }
-        }
-    }
-
-    init {
-        try {
-            if (Build.VERSION.SDK_INT == 18) {
-                app.registerReceiver(foreignReceiver, IntentFilter(ACTION))
-                registered = true
-            } else {
-                error("unsupported_trial_platform")
-            }
-        } catch (error: Exception) {
-            GeelyHudTrialSettings.revoke(ownerToken)
-            log("geely HUD trial unavailable: source observer registration failed ${error.javaClass.simpleName}")
-        }
-    }
 
     /** Called on the existing bounded navigation worker, including its one-second freshness tick. */
     @Synchronized fun update(generation: Long, frame: GeelyNavigationFrame?) {
-        if (registered && currentGeneration(generation)) {
+        if (!closed && currentGeneration(generation)) {
             channel = generation
             policy.update(frame)
-        } else if (!registered && GeelyHudTrialSettings.acquire(app, ownerToken)) {
-            GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.RECEIVER_UNVERIFIED)
-            GeelyHudTrialSettings.revoke(ownerToken)
         }
     }
 
     @Synchronized fun close() {
+        if (closed) return
         try { policy.close() } catch (error: Exception) {
             GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.CLEAR_FAILED)
             log("geely HUD trial close failed: ${error.javaClass.simpleName}; physical clear unverified")
         } finally {
-            if (registered) {
-                registered = false
-                try { app.unregisterReceiver(foreignReceiver) }
-                catch (error: Exception) { log("geely HUD source observer unregister failed: ${error.javaClass.simpleName}") }
-                finally { GeelyHudTrialSettings.release(ownerToken) }
-            } else {
-                GeelyHudTrialSettings.release(ownerToken)
-            }
+            closed = true
+            GeelyHudTrialSettings.release(ownerToken)
         }
     }
 
     private fun dispatch(fields: Map<String, Any>, requireConsent: Boolean) {
-        check(registered && currentGeneration(channel) && GeelyHudTrialSettings.owns(ownerToken) &&
+        check(!closed && currentGeneration(channel) && GeelyHudTrialSettings.owns(ownerToken) &&
             (!requireConsent || GeelyHudTrialSettings.acquire(app, ownerToken)) &&
-            factoryReadiness() == GeelyHudFactoryReadiness.READY) {
-            "factory_receiver_not_exclusive"
+            receiverReady()) {
+            "factory_receiver_unavailable"
         }
         val intent = Intent(ACTION).setComponent(RECEIVER)
         for ((key, value) in fields) when (value) {
@@ -122,33 +65,23 @@ internal class GeelyHudTrialOutput(
             is String -> intent.putExtra(key, value)
             else -> error("unsupported_oem_field")
         }
-        // Channel replacement can race the preceding identity/navigation checks. Recheck immediately
+        // Channel replacement can race the preceding identity checks. Recheck immediately
         // before Binder dispatch; a Binder call already in progress cannot be recalled.
         check(currentGeneration(channel)) { "stale_navigation_channel" }
         app.sendBroadcast(intent)
     }
 
-    private fun factoryReadiness(): GeelyHudFactoryReadiness {
-        if (!GeelyHudTrialSettings.available(app)) return GeelyHudFactoryReadiness.BLOCKED
+    private fun receiverReady(): Boolean {
+        if (!GeelyHudTrialSettings.available(app)) return false
         // Verify once on the worker, not on the UI thread or for every distance update.
         if (factoryVerified == null) factoryVerified = verifyFactory()
         if (factoryVerified != true) {
             GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.RECEIVER_UNVERIFIED)
-            return GeelyHudFactoryReadiness.BLOCKED
+            return false
         }
-        // Voice binding and AutoBackgroundService start AMap without a navigation route.
-        // A process list cannot establish route ownership. Default ON is a preference, not proof
-        // of an idle factory route. UNKNOWN waits for an end event or this owner's explicit check.
-        return when (factoryNavigation.activity) {
-            GeelyFactoryNavigationState.Activity.ACTIVE -> {
-                GeelyHudTrialSettings.report(ownerToken, GeelyHudTrialStatus.FACTORY_RUNNING)
-                GeelyHudFactoryReadiness.BLOCKED
-            }
-            GeelyFactoryNavigationState.Activity.INACTIVE -> GeelyHudFactoryReadiness.READY
-            GeelyFactoryNavigationState.Activity.UNKNOWN ->
-                if (GeelyHudTrialSettings.factoryIdleConfirmed(ownerToken)) GeelyHudFactoryReadiness.READY
-                else GeelyHudFactoryReadiness.WAITING
-        }
+        // User explicitly selected CarPlay as the sole navigation source. Do not query, infer or
+        // wait for factory navigation activity; this check protects only receiver identity.
+        return true
     }
 
     private fun verifyFactory(): Boolean = try {
@@ -166,7 +99,7 @@ internal class GeelyHudTrialOutput(
             pkg.versionCode == 6 && pkg.versionName == "0.6800" &&
             source.endsWith(".apk") && sha256(source) == FACTORY_APK_SHA256 &&
             sha256(source.removeSuffix(".apk") + ".odex") == FACTORY_ODEX_SHA256
-        log("geely HUD trial factory verification=$available; vehicle output requires session consent")
+        log("geely HUD receiver verification=$available; factory navigation state ignored by user setting")
         available
     } catch (error: Exception) {
         log("geely HUD trial factory verification failed: ${error.javaClass.simpleName}")

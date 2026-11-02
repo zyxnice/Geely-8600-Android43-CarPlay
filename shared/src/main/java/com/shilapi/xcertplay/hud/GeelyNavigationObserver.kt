@@ -86,7 +86,7 @@ internal class GeelyNavigationObserver(
 
     private fun report() {
         if (routeFrames == 0L && maneuverFrames == 0L) { onCandidate(generation, null); return }
-        val snapshot = route.current()
+        val snapshot = route.currentForGeely()
         val candidate = snapshot?.let(GeelyNavigationFrame::from)
         onCandidate(generation, candidate)
         val availability = when {
@@ -104,7 +104,7 @@ internal class GeelyNavigationObserver(
         lastAvailability = availability
         log("geely navigation observation channel=$generation status=$availability routeFrames=$routeFrames " +
             "maneuverFrames=$maneuverFrames noGuidanceFrames=$rejectedFrames apple=$snapshot " +
-            "candidate=${candidate?.candidateFields()} vehicleOutput=$outputMode")
+            "candidate=${candidate?.candidateFields()} decoder={${route.diagnostics()}} vehicleOutput=$outputMode")
     }
 
     private companion object { const val REPORT_INTERVAL_NS = 5_000_000_000L }

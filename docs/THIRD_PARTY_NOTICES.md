@@ -32,6 +32,17 @@ CarPlay and the CarPlay icon are Apple Inc. marks/assets. This asset is not cove
 
 Gradle dependency declarations and version catalog accompany the source. License files available in the resolved artifacts are included under `docs/licenses/dependencies/`.
 
+## Concentus software Opus decoder
+
+Concentus 1.0.2 (`io.github.jaredmdobson.concentus`) is a Java port of the Opus codec
+by Logan Stromberg and the Opus contributors. The 124 unmodified Java files were
+imported from the P21 release source archive (SHA-256
+`31f2a61ed7498417135d79f16e76d8c6ddec2826530d90b8177b001ca2d4d6e1`),
+under `full-source/shared/src/main/java/io/github/jaredmdobson/concentus/`.
+Original copyright and BSD-style license notices are retained in each source file;
+the accompanying license is bundled in APKs as `assets/licenses/CONCENTUS-LICENSE.txt`.
+This decoder supplies signed 16-bit PCM for negotiated Opus streams on Android below API21.
+
 ## Experimental authentication data
 
 The public preview APK includes an accessory certificate/key pair recovered from public Carlinkit C2Air Allwinner V821 firmware during the owner's local investigation. These data are not newly generated Apple-issued credentials for DiPlay and are not relicensed as project source code. They are bundled in the preview APK to reproduce the offline experiment; continued acceptance and suitability for general distribution are unresolved. The source archive does not contain the private key, and the separate Android APK-signing key is never distributed.

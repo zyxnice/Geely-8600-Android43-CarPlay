@@ -4,7 +4,7 @@ import java.nio.charset.Charset
 
 /**
  * Candidate for the 8600 AutoNaviReceiver ICON vocabulary, not BYD's NEW_ICON. This value type
- * never sends data; a separate, manually enabled trial owner controls experimental dispatch.
+ * never sends data; the output owner controls begin, guidance and end dispatch in that order.
  */
 internal data class GeelyNavigationFrame(
     val icon: Int,
@@ -52,7 +52,10 @@ internal data class GeelyNavigationFrame(
                     3, 5, 8, 9, 11, 51 -> 9
                     6 -> if (leftHand) 17 else 11
                     7 -> if (leftHand) 18 else 12
-                    10, 12, 24, 25, 27 -> 15
+                    // H53's turning-direction handler ignores ICON 13..16. ICON 1 writes code 0,
+                    // clearing the preceding arrow while the route's distance/road still update.
+                    // A destination/waypoint maneuver is not proof the entire route has ended.
+                    10, 12, 24, 25, 27 -> 1
                     else -> return null
                 }
             }

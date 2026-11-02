@@ -543,9 +543,5 @@
     <string name="geely_bt_connection_status_note">已选择 H52 原厂连接通路。请在主页选择已通过原厂界面配对的 iPhone，再尝试连接。这些状态不能证明无线 CarPlay 已连通。</string>
     <string name="geely_hud_trial_title">吉利 HUD 导航试验</string>
     <string name="geely_hud_trial_toggle">将手机导航显示到 HUD</string>
-    <string name="geely_hud_trial_description">默认开启并记住手动关闭选择。等待有效导航及原车空闲状态；冲突或异常时暂停输出。</string>
-    <string name="geely_hud_confirm_idle">确认原车未在导航</string>
-    <string name="geely_hud_trial_confirm_title">开始 HUD 停车试验</string>
-    <string name="geely_hud_trial_warning">仅在停车或台架条件下启用。请确认原车导航没有正在引导；后台常驻无需卸载或关闭。系统可能没有收到之前的导航状态，不能保证自动识别所有冲突。本功能会改变原厂导航状态，不能与原车导航同时使用。异常退出后可能残留显示，需能恢复原车导航。手机导航必须提供导航数据才能显示。</string>
-    <string name="geely_hud_trial_enable">启用本次试验</string>
+    <string name="geely_hud_trial_description">默认开启，记住手动关闭。CarPlay 提供有效导航数据后直接发送到 HUD，不检查原车导航状态。</string>
 </resources>

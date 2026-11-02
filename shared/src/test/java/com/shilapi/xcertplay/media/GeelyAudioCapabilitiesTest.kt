@@ -4,6 +4,19 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GeelyAudioCapabilitiesTest {
+    @Test fun onlyExactVerifiedVariantDefaultsToOemRouting() {
+        assertTrue(GeelyAudioCapabilities.defaultsToOemRouting(
+            "com.shihab.diplay.repair1.geely8600", 18, "C3ALFUS", "06.03.08600.H53.00060"))
+        assertFalse(GeelyAudioCapabilities.defaultsToOemRouting(
+            "com.shihab.diplay", 18, "C3ALFUS", "06.03.08600.H53.00060"))
+        assertFalse(GeelyAudioCapabilities.defaultsToOemRouting(
+            "com.shihab.diplay.repair1.geely8600", 29, "C3ALFUS", "06.03.08600.H53.00060"))
+        assertFalse(GeelyAudioCapabilities.defaultsToOemRouting(
+            "com.shihab.diplay.repair1.geely8600", 18, "other", "06.03.08600.H53.00060"))
+        assertFalse(GeelyAudioCapabilities.defaultsToOemRouting(
+            "com.shihab.diplay.repair1.geely8600", 18, "C3ALFUS", "06.03.08600.H53.other"))
+    }
+
     private val h52 = mapOf("STREAM_CARPLAYAUDIO" to 23, "STREAM_NAVI_TTS" to 11,
         "MODE_CARPLAYAUDIO" to 14, "STREAM_NAVI_ALERT" to 25)
 

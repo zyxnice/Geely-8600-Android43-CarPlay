@@ -543,9 +543,5 @@
     <string name="geely_bt_connection_status_note">The H52 factory connection route is selected. Choose an iPhone already paired in the factory interface, then try connecting. These status readings do not prove that wireless CarPlay is connected.</string>
     <string name="geely_hud_trial_title">Geely HUD navigation trial</string>
     <string name="geely_hud_trial_toggle">Show phone navigation on HUD</string>
-    <string name="geely_hud_trial_description">On by default; manual OFF is remembered. Output waits for usable guidance and an idle factory route, and pauses on conflicts or errors.</string>
-    <string name="geely_hud_confirm_idle">Confirm factory navigation is idle</string>
-    <string name="geely_hud_trial_confirm_title">Start a parked HUD trial</string>
-    <string name="geely_hud_trial_warning">Use only while parked or on a test bench. Confirm that factory navigation is not guiding a route; its background services may remain running. Earlier navigation state may not have been observed, so conflict detection is incomplete. This trial changes factory navigation state and cannot run alongside factory navigation. An interrupted app may leave information on the HUD; be ready to restore factory navigation. Phone navigation metadata is required.</string>
-    <string name="geely_hud_trial_enable">Enable this trial</string>
+    <string name="geely_hud_trial_description">Enabled by default; manual OFF is remembered. Valid CarPlay navigation is sent directly to the HUD without checking factory navigation state.</string>
 </resources>

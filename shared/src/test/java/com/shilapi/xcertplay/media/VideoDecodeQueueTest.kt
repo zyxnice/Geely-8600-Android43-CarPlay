@@ -6,19 +6,6 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VideoDecodeQueueTest {
-    @Test fun queueSnapshotExcludesControlsAndRetiredFrames() {
-        val queue = VideoDecodeQueue()
-        queue.offer(VideoJob.Config(VideoCodec.H264, ByteArray(20)))
-        queue.offer(VideoJob.Frame(ByteArray(3), 10))
-        queue.offer(VideoJob.SurfaceChanged(null))
-        queue.offer(VideoJob.Frame(ByteArray(4), 30))
-        assertEquals(VideoDecodeQueue.Snapshot(2, 7, 40), queue.snapshot(50))
-        queue.poll(0)
-        queue.poll(0)
-        assertEquals(VideoDecodeQueue.Snapshot(1, 4, 20), queue.snapshot(50))
-        queue.close()
-        assertEquals(VideoDecodeQueue.Snapshot(0, 0, 0), queue.snapshot(50))
-    }
     private fun h264Frame(idr: Boolean, receivedNs: Long) = VideoJob.Frame(
         byteArrayOf(0, 0, 0, 1, if (idr) 0x65 else 0x41, 1), receivedNs)
 

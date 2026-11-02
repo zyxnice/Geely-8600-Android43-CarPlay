@@ -123,13 +123,9 @@ class ScreenStream(
         val stats = StreamReceiveStats("video", onDiagnostic, cryptoDetails = { crypto.snapshot().toString() })
         try {
             val input = sock.getInputStream()
-            // Only the synchronous B receiver may reuse its AAD header: onMessage finishes
-            // authentication before the next read. C queues retain headers and must own theirs.
-            val reusableHeader = if (performance.stage == "B") ByteArray(HEADER_LEN) else null
-            if (reusableHeader != null) onDiagnostic("video receive headerReuseBytes=$HEADER_LEN bodies=independent")
             while (!closed.get()) {
                 stats.reading()
-                val header = readScreenBytes(input, HEADER_LEN, reusableHeader) ?: break
+                val header = readFully(input, HEADER_LEN) ?: break
                 val bodySize = readU32Le(header, 0)
                 if (bodySize > MAX_BODY) break
                 val body = readFully(input, bodySize) ?: break
@@ -150,7 +146,6 @@ class ScreenStream(
     private fun onMessage(header: ByteArray, body: ByteArray, stats: StreamReceiveStats) {
         when (header[OPCODE_OFFSET].toInt() and 0xff) {
             OP_VIDEO_FRAME -> {
-                stats.videoFrameReceived()
                 val payload = if (body.size >= ScreenCodec.TAG_SIZE) {
                     val started = System.nanoTime()
                     try {
@@ -205,7 +200,6 @@ class ScreenStream(
                 if (bodySize < 0 || bodySize > MAX_BODY) throw IOException("Invalid video body length: $bodySize")
                 val body = readFully(input, bodySize) ?: throw IOException("Truncated video body")
                 stats.received(HEADER_LEN + bodySize)
-                if (header[OPCODE_OFFSET].toInt() and 0xff == OP_VIDEO_FRAME) stats.videoFrameReceived()
                 queue.offer(sequence.packet(header, body, System.nanoTime()))
                 stats.processed()
             }
@@ -282,7 +276,17 @@ class ScreenStream(
         deliver { if (closeNotified.compareAndSet(false, true)) listener.onClosed(failure) }
     }
 
-    private fun readFully(input: InputStream, length: Int): ByteArray? = readScreenBytes(input, length)
+    private fun readFully(input: InputStream, length: Int): ByteArray? {
+        if (length < 0) return null
+        val output = ByteArray(length)
+        var offset = 0
+        while (offset < length) {
+            val read = input.read(output, offset, length - offset)
+            if (read < 0) return null
+            offset += read
+        }
+        return output
+    }
 
     private companion object {
         const val TAG = "xcertplay-usb"
@@ -293,24 +297,6 @@ class ScreenStream(
         const val MAX_BODY = 8 * 1024 * 1024
         const val MAX_FRAME_AGE_NS = 250_000_000L
     }
-}
-
-/**
- * Reads a complete wire record, or null on EOF (including a truncated record).
- * [reusable] is borrowed until the caller finishes synchronous processing; queued records must
- * omit it. Body allocations remain independently owned by the media/decryption pipeline.
- */
-internal fun readScreenBytes(input: InputStream, length: Int, reusable: ByteArray? = null): ByteArray? {
-    if (length < 0) return null
-    require(reusable == null || reusable.size == length) { "Screen buffer size must match record length" }
-    val output = reusable ?: ByteArray(length)
-    var offset = 0
-    while (offset < length) {
-        val read = input.read(output, offset, length - offset)
-        if (read < 0) return null
-        offset += read
-    }
-    return output
 }
 
 private fun ByteArray.hexPrefix(length: Int): String =

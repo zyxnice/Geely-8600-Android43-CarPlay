@@ -9,7 +9,6 @@ object GeelyHudTrialSettings {
     @Volatile private var currentStatus = GeelyHudTrialStatus.OFF
     private var initialized = false
     private var requestedEnabled = true
-    private var factoryIdleConfirmed = false
 
     fun available(context: Context): Boolean =
         context.packageName == "com.shihab.diplay.repair1.geely8600" &&
@@ -39,25 +38,13 @@ object GeelyHudTrialSettings {
         currentStatus = if (requested) GeelyHudTrialStatus.WAITING else GeelyHudTrialStatus.OFF
     }
 
-    /** Explicit assurance is only for this owner; ACTIVE evidence always takes precedence. */
-    @Synchronized fun confirmFactoryIdle(context: Context) {
-        initialize(context)
-        if (available(context) && requestedEnabled && currentStatus == GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN) {
-            factoryIdleConfirmed = true
-            currentStatus = GeelyHudTrialStatus.WAITING
-        }
-    }
-
-    @Synchronized internal fun factoryIdleConfirmed(token: Any): Boolean = lease.owns(token) && factoryIdleConfirmed
-
     fun status(): GeelyHudTrialStatus = currentStatus
 
     @Synchronized internal fun report(token: Any, status: GeelyHudTrialStatus) {
         if (!lease.owns(token)) return
         // A Binder send may return after the user switched off. Keep OFF authoritative;
         // errors remain visible because they can require physical HUD recovery.
-        if (status in setOf(GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.WAITING,
-                GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN) &&
+        if (status in setOf(GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.WAITING) &&
             !lease.acquire(token)) return
         currentStatus = status
     }
@@ -73,12 +60,11 @@ object GeelyHudTrialSettings {
     @Synchronized internal fun release(token: Any) {
         if (!lease.owns(token)) return
         lease.release(token)
-        factoryIdleConfirmed = false
         // Only a completed controller teardown can re-arm the saved preference. A failed owner
         // retains its revoked lease through all later ticks and cannot resurrect itself.
         lease.request(requestedEnabled)
         if (currentStatus in setOf(GeelyHudTrialStatus.OFF, GeelyHudTrialStatus.WAITING,
-                GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE, GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN)) {
+                GeelyHudTrialStatus.SENT, GeelyHudTrialStatus.STALE)) {
             currentStatus = if (requestedEnabled) GeelyHudTrialStatus.WAITING else GeelyHudTrialStatus.OFF
         }
     }
@@ -99,8 +85,7 @@ internal object GeelyHudPreferences {
 
 /** UI state for the current process. SENT means Android dispatch only, never physical HUD acceptance. */
 enum class GeelyHudTrialStatus {
-    OFF, WAITING, SENT, RECEIVER_UNVERIFIED, FACTORY_RUNNING, NAVIGATION_STATE_UNKNOWN,
-    SOURCE_CHANGED, STALE, SEND_FAILED, CLEAR_FAILED, RECONNECT_REQUIRED,
+    OFF, WAITING, SENT, RECEIVER_UNVERIFIED, STALE, SEND_FAILED, CLEAR_FAILED, RECONNECT_REQUIRED,
 }
 
 /** Retain ownership through asynchronous clearing; revocation must not grant a second writer. */

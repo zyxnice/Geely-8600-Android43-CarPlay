@@ -20,13 +20,23 @@ class GeelyNavigationFrameTest {
 
     @Test fun `turn direction and roundabout exit do not use BYD HUD glyph values`() {
         val cases = mapOf(1 to 2, 2 to 3, 13 to 4, 14 to 5, 47 to 6, 48 to 7,
-            4 to 8, 3 to 9, 6 to 11, 7 to 12, 10 to 15)
+            4 to 8, 3 to 9, 6 to 11, 7 to 12, 10 to 1)
         cases.forEach { (apple, icon) -> assertEquals(icon, GeelyNavigationFrame.from(snapshot(apple))!!.icon) }
         assertEquals(19, GeelyNavigationFrame.from(snapshot(4).copy(drivingSide = 1))!!.icon)
         val exit = GeelyNavigationFrame.from(snapshot(30))!!
         assertEquals(11, exit.icon)
         assertEquals(3, exit.roundaboutExit)
         assertEquals(17, GeelyNavigationFrame.from(snapshot(30).copy(drivingSide = 1))!!.icon)
+    }
+
+    @Test fun `destination and waypoint maneuvers clear direction instead of ignored ICON 15`() {
+        for (type in listOf(10, 12, 24, 25, 27)) {
+            val frame = GeelyNavigationFrame.from(snapshot(type))!!
+            assertEquals(1, frame.candidateFields()["ICON"])
+            assertEquals(250, frame.candidateFields()["SEG_REMAIN_DIS"])
+            assertEquals("人民路", frame.candidateFields()["NEXT_ROAD_NAME"])
+            assertFalse(frame.candidateFields().containsKey("EXTRA_STATE"))
+        }
     }
 
     @Test fun `unsupported or incomplete data cannot become an output candidate`() {

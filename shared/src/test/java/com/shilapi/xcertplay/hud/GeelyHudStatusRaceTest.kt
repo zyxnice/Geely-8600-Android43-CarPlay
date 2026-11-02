@@ -5,10 +5,10 @@ import org.junit.Test
 
 /** Exercise asynchronous Settings callbacks without Android platform or preference side effects. */
 class GeelyHudStatusRaceTest {
-    @Test fun `late unknown-state report cannot replace manual OFF`() = withRuntime { lease, token ->
+    @Test fun `late waiting report cannot replace manual OFF`() = withRuntime { lease, token ->
         lease.request(false)
         write("currentStatus", GeelyHudTrialStatus.OFF)
-        GeelyHudTrialSettings.report(token, GeelyHudTrialStatus.NAVIGATION_STATE_UNKNOWN)
+        GeelyHudTrialSettings.report(token, GeelyHudTrialStatus.WAITING)
         assertEquals(GeelyHudTrialStatus.OFF, GeelyHudTrialSettings.status())
         // Real recovery failures remain visible even when the requested output is OFF.
         GeelyHudTrialSettings.report(token, GeelyHudTrialStatus.CLEAR_FAILED)
@@ -27,7 +27,7 @@ class GeelyHudStatusRaceTest {
     }
 
     private fun withRuntime(check: (GeelyHudTrialLease, Any) -> Unit) {
-        val names = listOf("currentStatus", "requestedEnabled", "factoryIdleConfirmed")
+        val names = listOf("currentStatus", "requestedEnabled")
         val saved = names.associateWith(::read)
         val lease = read("lease") as GeelyHudTrialLease
         val token = Any()

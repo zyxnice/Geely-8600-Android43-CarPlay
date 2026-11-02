@@ -649,7 +649,6 @@ private class VideoDecoder(
         monitorProgress = performance.stage == "B",
     )
     private var lastKeyFrameRequestNs = 0L
-    private var lastQueueSampleNs = 0L
     // The main screen keeps the historical log format; other screens are labelled.
     private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
     private val pipeline = VideoPipelineStats(report = { report(it) })
@@ -688,11 +687,6 @@ private class VideoDecoder(
         com.shilapi.xcertplay.compat.GeelyMediaPerformance.configureVideoThread(performance.urgentVideo, report)
         try {
             while (running) {
-                val observedNs = System.nanoTime()
-                if (observedNs - lastQueueSampleNs >= 100_000_000L) {
-                    pipeline.queue(queue.snapshot(observedNs))
-                    lastQueueSampleNs = observedNs
-                }
                 val job = queue.poll(5)
                 try {
                     when (job) {
@@ -893,9 +887,7 @@ private class VideoDecoder(
 
     private fun feed(frame: VideoJob.Frame) {
         val nalus = frame.nalus
-        val prepareStarted = System.nanoTime()
         val annexB = MediaCodecSupport.toAnnexB(nalus)
-        pipeline.record(VideoPipelineStats.Stage.INPUT_PREPARE, System.nanoTime() - prepareStarted)
         val config = lastConfig ?: return
         if (outputSurface == null) return
         if (annexB.isEmpty()) { recover("invalid video access unit"); return }
@@ -920,14 +912,7 @@ private class VideoDecoder(
         val index = VideoInputPump.acquire(
             running = { running }, drain = { drainOutput(codec) },
             // Keep output service opportunities frequent on B without a zero-timeout busy loop.
-            dequeue = {
-                val started = System.nanoTime()
-                try {
-                    codec.dequeueInputBuffer(if (performance.stage == "B") 1_000L else INPUT_TIMEOUT_US)
-                } finally {
-                    pipeline.record(VideoPipelineStats.Stage.INPUT_DEQUEUE, System.nanoTime() - started)
-                }
-            },
+            dequeue = { codec.dequeueInputBuffer(if (performance.stage == "B") 1_000L else INPUT_TIMEOUT_US) },
         )
         // Includes output draining while input is unavailable; OUTPUT_* timings expose that work.
         pipeline.record(VideoPipelineStats.Stage.INPUT_WAIT, System.nanoTime() - inputWaitStarted)
@@ -939,7 +924,6 @@ private class VideoDecoder(
             input.put(annexB)
             val queuedNs = System.nanoTime()
             pipeline.record(VideoPipelineStats.Stage.INPUT_COPY, queuedNs - copyStarted)
-            pipeline.copy(annexB.size, if (annexB === nalus) 0 else annexB.size)
             val presentationTimeUs = queuedNs / 1000
             codec.queueInputBuffer(index, 0, annexB.size, presentationTimeUs, 0)
             pipeline.input(presentationTimeUs, frame.receivedNs)

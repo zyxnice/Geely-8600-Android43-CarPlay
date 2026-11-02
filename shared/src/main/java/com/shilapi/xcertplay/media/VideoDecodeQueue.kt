@@ -48,15 +48,8 @@ internal class VideoDecodeQueue(
             discardFrames()
         }
         if (job is VideoJob.Frame) {
-            // Count under the existing producer lock without allocating a temporary list for
-            // every video frame. The consumer can only decrease this conservative snapshot.
-            var pendingFrames = 0
-            var pendingBytes = 0L
-            for (pending in jobs) if (pending is VideoJob.Frame) {
-                pendingFrames++
-                pendingBytes += pending.nalus.size
-            }
-            if (pendingFrames >= maxFrames || pendingBytes + job.nalus.size > maxBytes) {
+            val frames = jobs.filterIsInstance<VideoJob.Frame>()
+            if (frames.size >= maxFrames || frames.sumOf { it.nalus.size.toLong() } + job.nalus.size > maxBytes) {
                 discardFrames()
                 jobs.offer(VideoJob.Resync())
             }
@@ -125,22 +118,6 @@ internal class VideoDecodeQueue(
 
     /** Selected IDR is removed too; the sole decoder consumer must feed it before polling again. */
     data class CatchUp(val frame: VideoJob.Frame, val discarded: Int)
-
-    /** Pending compressed pictures only; excludes the consumer's current frame and control payloads. */
-    data class Snapshot(val frames: Int, val bytes: Long, val oldestAgeNs: Long)
-
-    /** Called by the sole consumer; producer/close exclusion gives a coherent queue observation. */
-    @Synchronized fun snapshot(nowNs: Long): Snapshot {
-        var frames = 0
-        var bytes = 0L
-        var oldestAge = 0L
-        for (job in jobs) if (job is VideoJob.Frame) {
-            frames++
-            bytes += job.nalus.size
-            oldestAge = maxOf(oldestAge, nowNs - job.receivedNs)
-        }
-        return Snapshot(frames, bytes, oldestAge)
-    }
 
     /**
      * Skip only a contiguous frame prefix ending at a fresh H264 IDR. Never cross an ordered

@@ -41,11 +41,16 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     private var emptyListDistanceSkips = 0L
     private var malformedFrames = 0L
     private var lastParse = "none"
+    /** Frozen complete old maneuver, never combined with the pending index's incremental fields. */
+    private var geelyHandoffSnapshot: Iap2RouteManeuver? = null
+    /** First index change owns the deadline; consecutive incomplete indices cannot extend it. */
+    private var geelyHandoffStartedNs: Long? = null
 
     /** Counts describe this decoder instance, including rejected frames; ticks never increment them. */
     fun diagnostics(): String = "distanceSeen=$distanceFieldsReceived distanceApplied=$distanceFieldsApplied " +
         "emptyListDistanceSkips=$emptyListDistanceSkips malformed=$malformedFrames lastParse=$lastParse " +
-        "routeUpdatedNs=$lastRouteUpdateNs distanceUpdatedNs=$lastDistanceUpdateNs activeIndex=$activeIndex"
+        "routeUpdatedNs=$lastRouteUpdateNs distanceUpdatedNs=$lastDistanceUpdateNs activeIndex=$activeIndex " +
+        "handoffStartedNs=$geelyHandoffStartedNs handoffHeld=${geelyHandoffSnapshot != null}"
 
     fun accept(messageId: Int, payload: ByteArray): Iap2RouteChange {
         if (!validTlvs(payload)) {
@@ -63,7 +68,23 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     fun current(): Iap2RouteManeuver? = snapshot(retainDistance = false)
 
     /** Geely keeps a known distance for the same live maneuver; route loss and empty-list rules still apply. */
-    fun currentForGeely(): Iap2RouteManeuver? = snapshot(retainDistance = true)
+    fun currentForGeely(): Iap2RouteManeuver? {
+        val current = snapshot(retainDistance = true)
+        if (current != null && current.distanceKnown && current.drivingSideKnown) {
+            geelyHandoffSnapshot = null
+            geelyHandoffStartedNs = null
+            return current
+        }
+        val started = geelyHandoffStartedNs ?: return current
+        val now = nanoTime()
+        val routeFresh = routeActive && lastRouteUpdateNs?.let { now - it < STALE_ROUTE_NS } == true
+        val listFresh = emptyListSinceNs?.let { now - it < EMPTY_LIST_HIDE_NS } != false
+        if (routeFresh && listFresh && now - started in 0 until GEELY_HANDOFF_NS) {
+            return geelyHandoffSnapshot ?: current
+        }
+        geelyHandoffSnapshot = null
+        return current
+    }
 
     private fun snapshot(retainDistance: Boolean): Iap2RouteManeuver? {
         val maneuver = activeManeuver() ?: return null
@@ -87,6 +108,8 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
         emptyListSinceNs = null
         lastRouteUpdateNs = null
         maneuvers.clear()
+        geelyHandoffSnapshot = null
+        geelyHandoffStartedNs = null
         return wasActive
     }
 
@@ -103,6 +126,8 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
     private fun roadFor(maneuver: Maneuver): String = maneuver.afterRoad.ifEmpty { currentRoad }
 
     private fun parseRouteUpdate(data: ByteArray): Iap2RouteChange {
+        // Capture before any route TLV mutates road/totals. Only Geely reads this frozen snapshot.
+        val previousGeely = currentForGeely()
         // A resumed stream cannot revive a distance from before a full route timeout.
         if (lastRouteUpdateNs?.let { nanoTime() - it >= STALE_ROUTE_NS } == true) distanceKnown = false
         lastRouteUpdateNs = nanoTime()
@@ -145,7 +170,14 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
         if (firstManeuver != null) emptyListSinceNs = null
         if (state != null) routeActive = true
         if (firstManeuver != null) {
-            if (activeIndex != firstManeuver) distanceKnown = false
+            if (activeIndex != firstManeuver) {
+                if (geelyHandoffStartedNs == null && previousGeely?.distanceKnown == true &&
+                    previousGeely.drivingSideKnown) {
+                    geelyHandoffSnapshot = previousGeely
+                    geelyHandoffStartedNs = nanoTime()
+                }
+                distanceKnown = false
+            }
             activeIndex = firstManeuver!!
             routeActive = true
         }
@@ -223,5 +255,6 @@ internal class Iap2RouteState(private val nanoTime: () -> Long = System::nanoTim
         private const val TLV_HEADER_BYTES = 4
         private const val STALE_ROUTE_NS = 30_000_000_000L
         private const val EMPTY_LIST_HIDE_NS = 3_000_000_000L
+        private const val GEELY_HANDOFF_NS = 1_000_000_000L
     }
 }

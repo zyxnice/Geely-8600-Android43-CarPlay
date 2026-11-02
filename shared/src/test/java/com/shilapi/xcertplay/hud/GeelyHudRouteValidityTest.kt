@@ -35,11 +35,14 @@ class GeelyHudRouteValidityTest {
         assertEquals(listOf("begin", "guide:250", "guide:100"), f.events)
     }
 
-    @Test fun `new maneuver cannot display previous maneuver distance`() {
+    @Test fun `new maneuver waits briefly without borrowing old distance then expires`() {
         val f = Fixture()
         f.start()
         f.observer.accept(f.token, maneuver(index = 2))
         f.send(fields(tlv(1, 1), tlv(13, 0, 2)))
+        assertEquals(listOf("begin", "guide:250"), f.events)
+        f.now = 1_000_000_000L
+        f.observer.tick()
         assertEquals("end", f.events.last())
         f.observer.accept(f.token, route(index = 2, distance = 20))
         assertEquals(listOf("begin", "guide:20"), f.events.takeLast(2))

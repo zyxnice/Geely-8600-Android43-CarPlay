@@ -34,7 +34,7 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
         try {
             if (arguments.length != 4 || !arguments[0].matches("[0-9]{1,16}")
                     || !arguments[2].matches("[a-f0-9]{32}")
-                    || (!"prepare".equals(arguments[3]) && !"recover-enumeration".equals(arguments[3])))
+                    || !validOperation(arguments[3]))
                 throw new IOException("runtime_arguments");
             File lease = new File(arguments[1]);
             if (!lease.getCanonicalFile().equals(lease) || !lease.getName().equals("runtime-" + arguments[2] + ".lease")
@@ -46,14 +46,30 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
             if (Process.myUid() != 0 || !GeelyUsbRuntimePolicy.matches(Build.VERSION.SDK_INT, Build.BOARD, Build.DISPLAY, true))
                 throw new IOException("runtime_platform_guard");
             GeelyUsbRuntimeHelper port = new GeelyUsbRuntimeHelper(deadline, lease, arguments[2]);
-            String result = "prepare".equals(arguments[3]) ? GeelyUsbRuntimePolicy.prepare(port)
-                    : GeelyUsbRuntimePolicy.recoverEnumeration(port);
+            if ("recover-boot-role".equals(arguments[3])) {
+                GeelyUsbRuntimePolicy.State initial = port.read();
+                android.util.Log.i("GeelyUsbRuntime", "Boot recovery start role=" + initial.role
+                        + " config=" + initial.config + " applied=" + initial.appliedConfig
+                        + " charging=" + initial.charging + " power=" + initial.power
+                        + " fault=" + initial.fault + " device=" + initial.bootRecoveryDevice);
+            }
+            String result;
+            if ("recover-boot-role".equals(arguments[3])) result = GeelyUsbRuntimePolicy.recoverBootRole(port);
+            else if ("recover-enumeration".equals(arguments[3])) result = GeelyUsbRuntimePolicy.recoverEnumeration(port);
+            else result = GeelyUsbRuntimePolicy.prepare(port);
             System.out.println("GEELY_RUNTIME_OK:" + result);
+            android.util.Log.i("GeelyUsbRuntime", "Runtime operation=" + arguments[3] + " result=" + result);
         } catch (Exception failure) {
+            android.util.Log.w("GeelyUsbRuntime", "Runtime operation failed", failure);
             String reason = failure.getMessage();
             System.out.println("GEELY_RUNTIME_FAILED:" + (reason != null && reason.matches("[a-z_]{1,64}") ? reason : "runtime_failure"));
         }
         System.exit(0);
+    }
+
+    static boolean validOperation(String operation) {
+        return "prepare".equals(operation) || "recover-enumeration".equals(operation)
+                || "recover-boot-role".equals(operation);
     }
 
     private void checkDeadline() throws IOException {
@@ -74,6 +90,24 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
         checkDeadline();
     }
 
+    @Override public void awaitRoleObservation() throws Exception {
+        checkDeadline();
+        Thread.sleep(250);
+        checkDeadline();
+    }
+
+    @Override public void awaitRoleSettled() throws Exception {
+        long until = Math.min(deadline - 2000, SystemClock.elapsedRealtime() + 1500);
+        do {
+            checkDeadline();
+            String role = text("/proc/driver/usbroleswitch/0/mode");
+            if ("0".equals(role) || "1".equals(role)) return;
+            if (!"-1".equals(role)) throw new IOException("unexpected_usb_role");
+            Thread.sleep(50);
+        } while (SystemClock.elapsedRealtime() < until);
+        throw new IOException("boot_role_still_busy");
+    }
+
     @Override public void awaitRestored(GeelyUsbRuntimePolicy.State original) throws Exception {
         do {
             checkDeadline();
@@ -86,9 +120,18 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
 
     @Override public GeelyUsbRuntimePolicy.State read() throws Exception {
         checkDeadline();
+        String role = text("/proc/driver/usbroleswitch/0/mode");
         return new GeelyUsbRuntimePolicy.State(property("sys.usb.config"), property("sys.usb.state"),
-                text("/proc/driver/usbroleswitch/0/mode"), text(OTG + "charging_mode"),
-                text(OTG + "power"), text(OTG + "pin_fault/status"), activeApple(), busOccupied());
+                role, text(OTG + "charging_mode"),
+                text(OTG + "power"), text(OTG + "pin_fault/status"), activeApple(), busOccupied(),
+                "-1".equals(role) ? bootRecoveryDevice() : null);
+    }
+
+    @Override public boolean readPowered() throws Exception {
+        checkDeadline();
+        // USB descriptor nodes are expected to disappear during a power cycle. They must
+        // not participate in judging whether supply was safely removed or restored.
+        return GeelyUsbRuntimePolicy.isPowered(text(OTG + "power"));
     }
 
     @Override public void configuration(String value) throws Exception {
@@ -143,6 +186,7 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
         FileOutputStream output = new FileOutputStream(path);
         try { output.write(value.getBytes("US-ASCII")); output.flush(); }
         finally { output.close(); }
+        android.util.Log.i("GeelyUsbRuntime", "Runtime write node=" + path + " value=" + value + " rollback=" + rollingBack);
     }
 
     private static boolean activeApple() throws IOException {
@@ -164,5 +208,32 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
             if (GeelyUsbRuntimePolicy.occupiesOtgBus(path.getName())) return true;
         }
         return false;
+    }
+
+    private static String bootRecoveryDevice() throws IOException {
+        return bootRecoveryDevice(new File("/sys/bus/usb/devices"));
+    }
+
+    static String bootRecoveryDevice(File devices) throws IOException {
+        File[] paths = devices.listFiles();
+        if (paths == null) throw new IOException("runtime_usb_listing");
+        boolean found = false;
+        for (File path : paths) {
+            String name = path.getName();
+            if (!GeelyUsbRuntimePolicy.occupiesOtgBus(name)) continue;
+            if ("1-1".equals(name)) found = true;
+            else if (!bootPhoneInterface(name)) return null;
+        }
+        if (!found) return null;
+        File phone = new File(devices, "1-1");
+        if (!"05ac".equals(text(phone + "/idVendor")) || !"12a8".equals(text(phone + "/idProduct"))
+                || !"2".equals(text(phone + "/bConfigurationValue"))) return null;
+        String number = text(phone + "/devnum");
+        if (!number.matches("[1-9][0-9]{0,2}")) return null;
+        return "1-1:" + number;
+    }
+
+    static boolean bootPhoneInterface(String name) {
+        return name.matches("1-1:[0-9]+\\.[0-9]+");
     }
 }

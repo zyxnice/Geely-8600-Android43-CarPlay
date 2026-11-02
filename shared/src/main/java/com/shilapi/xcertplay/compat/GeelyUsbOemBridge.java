@@ -29,15 +29,16 @@ final class GeelyUsbOemBridge {
     }
 
     String prepareRuntime(File helperDex, File runtimeDirectory, long deadline, File lease, String nonce,
-            boolean recoverEnumeration) throws IOException {
+            String operation) throws IOException {
+        if (!GeelyUsbRuntimeHelper.validOperation(operation)) throw new IOException("runtime_arguments");
         if (!lease.getCanonicalFile().getParentFile().equals(helperDex.getCanonicalFile().getParentFile())
                 || !nonce.matches("[a-f0-9]{32}") || !lease.getName().equals("runtime-" + nonce + ".lease"))
             throw new IOException("runtime_lease_path");
         String result = execute(buildHelperCommand(helperDex, runtimeDirectory,
                 GeelyUsbRuntimeHelper.ENTRY_POINT, new String[] {Long.toString(deadline), lease.getCanonicalPath(), nonce,
-                        recoverEnumeration ? "recover-enumeration" : "prepare"}));
+                        operation}));
         java.util.regex.Matcher ok = java.util.regex.Pattern.compile(
-                "GEELY_RUNTIME_OK:(ready|prepared|active-preserved|device-preserved|not-ready|enumeration-restarted)").matcher(result);
+                "GEELY_RUNTIME_OK:(ready|prepared|active-preserved|device-preserved|not-ready|enumeration-restarted|boot-role-recovered)").matcher(result);
         if (ok.find()) return ok.group(1);
         java.util.regex.Matcher failure = java.util.regex.Pattern.compile("GEELY_RUNTIME_FAILED:([a-z_]{1,64})").matcher(result);
         throw new IOException(failure.find() ? failure.group(1) : "runtime_no_verified_response");

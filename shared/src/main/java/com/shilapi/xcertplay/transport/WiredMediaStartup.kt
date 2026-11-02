@@ -3,7 +3,9 @@ package com.shilapi.xcertplay.transport
 /**
  * Tracks the first media TCP handshake after wired StartSession. When StartSession preceded USB
  * OUT readiness, the phone may exhaust NDP before the queued replies can be delivered. Allow those
- * replies a short grace period, then reannounce once on the same control channel. A TCP acceptance
+ * replies 500 ms, or an initially ready path 1500 ms, then reannounce once on the same channel.
+ * Once OUT is ready, allow eight seconds for TCP within the original 25-second overall limit.
+ * These are trial recovery budgets, not a guarantee that the phone will connect. A TCP acceptance
  * permanently disarms this policy for the attachment; it never restarts an established session.
  * All methods are called by the single iAP2 control worker, using monotonic milliseconds.
  */
@@ -25,6 +27,7 @@ internal class WiredMediaStartup {
         if (firstStartMillis != null) return
         firstStartMillis = nowMillis
         awaitingOutput = !outputReady
+        if (outputReady) outputReadyMillis = nowMillis
     }
 
     fun poll(nowMillis: Long, outputReady: Boolean, tcpAccepted: Boolean): Action {
@@ -32,9 +35,13 @@ internal class WiredMediaStartup {
         if (connected) return Action.NONE
         val started = firstStartMillis ?: return Action.NONE
         if (nowMillis - started >= FIRST_TCP_TIMEOUT_MILLIS) return Action.TIMED_OUT
-        if (!awaitingOutput || reannounced || !outputReady) return Action.NONE
+        if (!outputReady) return Action.NONE
         val readyAt = outputReadyMillis ?: nowMillis.also { outputReadyMillis = it }
-        if (nowMillis - readyAt < REPLY_GRACE_MILLIS) return Action.NONE
+        // USB OUT acceptance permits a bounded first-TCP window; it is not a media success signal.
+        if (nowMillis - readyAt >= READY_TCP_TIMEOUT_MILLIS) return Action.TIMED_OUT
+        if (reannounced) return Action.NONE
+        val grace = if (awaitingOutput) REPLY_GRACE_MILLIS else INITIAL_READY_GRACE_MILLIS
+        if (nowMillis - readyAt < grace) return Action.NONE
         reannounced = true
         return Action.REANNOUNCE
     }
@@ -42,6 +49,8 @@ internal class WiredMediaStartup {
     companion object {
         const val POLL_MILLIS = 250L
         private const val REPLY_GRACE_MILLIS = 500L
+        private const val INITIAL_READY_GRACE_MILLIS = 1_500L
+        private const val READY_TCP_TIMEOUT_MILLIS = 8_000L
         private const val FIRST_TCP_TIMEOUT_MILLIS = 25_000L
     }
 }

@@ -28,11 +28,36 @@ class WiredMediaStartupTest {
     }
 
     @Test
-    fun outputAlreadyReadyDoesNotReannounce() {
+    fun outputAlreadyReadyReannouncesOnceThenExpiresWithinReadyBudget() {
         val startup = WiredMediaStartup()
         startup.startSent(0, true)
-        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(5_000, true, false))
-        assertEquals(WiredMediaStartup.Action.TIMED_OUT, startup.poll(25_000, true, false))
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(1_499, true, false))
+        assertEquals(WiredMediaStartup.Action.REANNOUNCE, startup.poll(1_500, true, false))
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(7_999, true, false))
+        assertEquals(WiredMediaStartup.Action.TIMED_OUT, startup.poll(8_000, true, false))
+    }
+
+    @Test fun lateReadyKeepsOriginalUsbToleranceButBoundsSubsequentWait() {
+        val startup = WiredMediaStartup()
+        startup.startSent(0, false)
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(14_000, false, false))
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(15_000, true, false))
+        assertEquals(WiredMediaStartup.Action.REANNOUNCE, startup.poll(15_500, true, false))
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(22_999, true, false))
+        assertEquals(WiredMediaStartup.Action.TIMED_OUT, startup.poll(23_000, true, false))
+    }
+
+    @Test fun repeatedAvailabilityCannotExtendReadyBudgetAndTcpWinsDeadline() {
+        val startup = WiredMediaStartup()
+        startup.startSent(0, true)
+        startup.startSent(7_000, true)
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(8_000, true, true))
+        assertFalse(startup.isWatching)
+        assertEquals(WiredMediaStartup.Action.NONE, startup.poll(50_000, true, false))
+        val stalled = WiredMediaStartup()
+        stalled.startSent(0, true)
+        stalled.startSent(7_000, true)
+        assertEquals(WiredMediaStartup.Action.TIMED_OUT, stalled.poll(8_000, true, false))
     }
 
     @Test

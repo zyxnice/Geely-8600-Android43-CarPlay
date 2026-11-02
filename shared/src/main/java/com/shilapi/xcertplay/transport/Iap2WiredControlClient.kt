@@ -84,7 +84,7 @@ class Iap2WiredControlClient(
                         }
                         WiredMediaStartup.Action.TIMED_OUT -> {
                             if (expireMediaStartup()) {
-                                onProgress("iap2 media startup: no first TCP within 25000ms; ended stalled attachment")
+                                onProgress("iap2 media startup: first TCP deadline expired (USB-ready budget 8000ms, overall budget 25000ms); ended stalled attachment")
                                 return Iap2WiredControlResult(
                                     Iap2WiredControlTerminal.NO_MEDIA_TCP, stage, forwardedFrames, carPlayStartSessions,
                                 )

@@ -73,9 +73,12 @@ public final class GeelyUsbRuntimeRecovery {
         final String nonce = java.util.UUID.randomUUID().toString().replace("-", "");
         final File lease = new File(dex.getParentFile(), "runtime-" + nonce + ".lease");
         final long deadline = SystemClock.elapsedRealtime() + 6000;
+        final String operation = recoverEnumeration ? "recover-enumeration"
+                : (stalledRole() ? "recover-boot-role" : "prepare");
         FutureTask<String> task;
         synchronized (GeelyUsbRuntimeRecovery.class) {
             if (operationPending()) return false;
+            if ("recover-boot-role".equals(operation)) claimBootRoleRecovery();
             java.io.FileOutputStream output = new java.io.FileOutputStream(lease);
             try { output.write(nonce.getBytes("US-ASCII")); } finally { output.close(); }
             activeLease = lease;
@@ -84,7 +87,7 @@ public final class GeelyUsbRuntimeRecovery {
                 @Override public String call() throws Exception {
                     if (stopped) throw new IOException("runtime_cancelled");
                     return new GeelyUsbOemBridge().prepareRuntime(dex, new File(dex.getParentFile(), "runtime"),
-                            deadline, lease, nonce, recoverEnumeration);
+                            deadline, lease, nonce, operation);
                 }
             });
             inFlight = task;
@@ -94,9 +97,9 @@ public final class GeelyUsbRuntimeRecovery {
         }
         try {
             summary = task.get(8, TimeUnit.SECONDS);
-            if ("prepared".equals(summary)) changes++;
+            if ("prepared".equals(summary) || "boot-role-recovered".equals(summary)) changes++;
             Log.i(TAG, "8600 runtime preparation result=" + summary + " changes=" + changes
-                    + " enumerationRecovery=" + recoverEnumeration);
+                    + " operation=" + operation);
             return true;
         } catch (Exception failure) {
             if (failure instanceof InterruptedException) Thread.currentThread().interrupt();
@@ -111,6 +114,28 @@ public final class GeelyUsbRuntimeRecovery {
     }
 
     static synchronized boolean operationPending() { return inFlight != null && !inFlight.isDone(); }
+
+    private static boolean stalledRole() throws IOException {
+        return "-1".equals(GeelyUsbRuntimeHelper.text("/proc/driver/usbroleswitch/0/mode"));
+    }
+
+    private void claimBootRoleRecovery() throws IOException {
+        String boot = GeelyUsbRuntimeHelper.text("/proc/sys/kernel/random/boot_id");
+        claimBootRoleRecovery(context.getSharedPreferences("geely_usb_runtime", Context.MODE_PRIVATE), boot);
+        Log.i(TAG, "8600 boot role recovery claimed; helper will verify exclusive pre-CarPlay phone");
+    }
+
+    /** Called under the process-wide operation lock; synchronous persistence fences later controllers. */
+    static void claimBootRoleRecovery(android.content.SharedPreferences saved, String boot) throws IOException {
+        if (!boot.matches("[a-f0-9]{8}(-[a-f0-9]{4}){3}-[a-f0-9]{12}"))
+            throw new IOException("boot_role_boot_id_invalid");
+        if (boot.equals(saved.getString("role_recovery_boot", null)))
+            throw new IOException("boot_role_recovery_already_attempted");
+        // Persist before the privileged launch: a crash, cancellation or controller restart
+        // must never turn this disruptive recovery into a repeating power cycle.
+        if (!saved.edit().putString("role_recovery_boot", boot).commit())
+            throw new IOException("boot_role_attempt_not_saved");
+    }
 
     private static boolean locallyReady() {
         try {

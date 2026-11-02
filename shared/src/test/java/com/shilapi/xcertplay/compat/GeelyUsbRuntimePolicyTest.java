@@ -7,6 +7,87 @@ import java.util.List;
 import static org.junit.Assert.*;
 
 public final class GeelyUsbRuntimePolicyTest {
+    @Test public void stalledBootPhoneRecoversPowerThenUsesNormalPreparation() throws Exception {
+        Fake port = stalledBootPort(); port.topologyDisappearsOnPowerOff = true;
+        assertEquals("boot-role-recovered", GeelyUsbRuntimePolicy.recoverBootRole(port));
+        assertEquals("[observe, power:off, discharge, power:on, settle, config:accessory,ncm, host, charge:sdp]",
+                port.calls.toString());
+        assertTrue(port.read().ready());
+    }
+
+    @Test public void bootRecoveryDoesNotRelaxNormalPreparationOrEmptyBusRecovery() throws Exception {
+        Fake port = stalledBootPort();
+        try { GeelyUsbRuntimePolicy.prepare(port); fail(); }
+        catch (IOException expected) { assertEquals("unexpected_usb_role", expected.getMessage()); }
+        try { GeelyUsbRuntimePolicy.recoverEnumeration(port); fail(); }
+        catch (IOException expected) { assertEquals("unexpected_usb_role", expected.getMessage()); }
+        assertTrue(port.calls.isEmpty());
+    }
+
+    @Test public void bootRecoveryRejectsEveryUnverifiedStateWithoutWrites() throws Exception {
+        for (int scenario = 0; scenario < 9; scenario++) {
+            Fake port = stalledBootPort();
+            if (scenario == 0) port.active = true;
+            if (scenario == 1) port.bootDevice = null;
+            if (scenario == 2) port.role = "0";
+            if (scenario == 3) port.config = "accessory,ncm";
+            if (scenario == 4) port.charge = "sdp";
+            if (scenario == 5) port.power = "off";
+            if (scenario == 6) port.fault = "overcurrent";
+            if (scenario == 7) port.occupied = false;
+            if (scenario == 8) port.appliedOverride = "accessory,ncm";
+            try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail("scenario=" + scenario); }
+            catch (IOException expected) { assertEquals("boot_role_state_not_eligible", expected.getMessage()); }
+            assertTrue(port.calls.isEmpty());
+        }
+    }
+
+    @Test public void phoneChangeOrNaturalRoleCompletionPreventsBootPowerCycle() throws Exception {
+        for (int change = 1; change <= 3; change++) {
+            Fake port = stalledBootPort(); port.changeDuringObservation = change;
+            try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail(); }
+            catch (IOException expected) { assertEquals("boot_role_state_changed", expected.getMessage()); }
+            assertEquals("[observe]", port.calls.toString());
+        }
+    }
+
+    @Test public void bootRoleStillBusyRestoresPowerWithoutForcingMode() throws Exception {
+        Fake port = stalledBootPort(); port.roleStaysBusy = true;
+        try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail(); }
+        catch (IOException expected) { assertEquals("boot_role_still_busy", expected.getMessage()); }
+        assertEquals("[observe, power:off, discharge, power:on, settle, power:on]", port.calls.toString());
+        assertEquals("-1", port.role);
+        assertTrue(port.read().powered());
+    }
+
+    @Test public void cancelledBootRecoveryRestoresSupplyAndDoesNotPrepare() throws Exception {
+        Fake port = stalledBootPort(); port.cancelDuringDischarge = true;
+        try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail(); }
+        catch (IOException expected) { assertEquals("runtime_cancelled", expected.getMessage()); }
+        assertEquals("[observe, power:off, discharge, power:on]", port.calls.toString());
+        assertTrue(port.read().powered());
+    }
+
+    @Test public void ignoredBootPowerOffNeverClaimsRecovery() throws Exception {
+        Fake port = stalledBootPort(); port.ignorePowerOff = true;
+        try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail(); }
+        catch (IOException expected) { assertEquals("runtime_power_off_readback", expected.getMessage()); }
+        assertEquals("[observe, power:off, power:on]", port.calls.toString());
+    }
+
+    @Test public void failedBootSupplyRestoreRemainsExplicit() throws Exception {
+        Fake port = stalledBootPort(); port.failPowerOn = true;
+        try { GeelyUsbRuntimePolicy.recoverBootRole(port); fail(); }
+        catch (IOException expected) { assertEquals("runtime_rollback_failed", expected.getMessage()); }
+    }
+
+    private static Fake stalledBootPort() {
+        Fake port = new Fake();
+        port.role = "-1"; port.charge = "cdp"; port.power = "normal, power on";
+        port.occupied = true; port.bootDevice = "1-1:2";
+        return port;
+    }
+
     @Test public void rootHubInterfaceDoesNotBlockEmptyOtgRecovery() {
         assertFalse(GeelyUsbRuntimePolicy.occupiesOtgBus("1-0:1.0"));
         assertFalse(GeelyUsbRuntimePolicy.occupiesOtgBus("usb1"));
@@ -232,13 +313,31 @@ public final class GeelyUsbRuntimePolicyTest {
         String config = "accessory,ncm,adb", role = "1", charge = "dcp", power = "off", fault = "working fine";
         boolean active, hostFails, ignoreSdp, cancelDuringWait, cancelled, rollback, failChargeRollback, ignoreRoleRestore;
         boolean occupied, attachOnSecondRead, cancelDuringDischarge, ignorePowerOff, failPowerOn, pendingConfig;
+        boolean roleStaysBusy;
+        boolean topologyDisappearsOnPowerOff;
+        String bootDevice, appliedOverride;
+        int changeDuringObservation;
         int reads;
         List<String> calls = new ArrayList<>();
         public GeelyUsbRuntimePolicy.State read() throws IOException {
             if (cancelled && !rollback) throw new IOException("runtime_cancelled");
+            if (topologyDisappearsOnPowerOff && "off".equals(power)) throw new IOException("device_removed");
             if (++reads == 2 && attachOnSecondRead) occupied = true;
-            return new GeelyUsbRuntimePolicy.State(config, pendingConfig ? "accessory,ncm,adb" : config,
-                    role, charge, power, fault, active, occupied || active);
+            String applied = appliedOverride != null ? appliedOverride : (pendingConfig ? "accessory,ncm,adb" : config);
+            return new GeelyUsbRuntimePolicy.State(config, applied,
+                    role, charge, power, fault, active, occupied || active, bootDevice);
+        }
+        public boolean readPowered() { return GeelyUsbRuntimePolicy.isPowered(power); }
+        public void awaitRoleObservation() {
+            calls.add("observe");
+            if (changeDuringObservation == 1) bootDevice = "1-1:3";
+            if (changeDuringObservation == 2) role = "0";
+            if (changeDuringObservation == 3) active = true;
+        }
+        public void awaitRoleSettled() throws IOException {
+            calls.add("settle");
+            if (roleStaysBusy) throw new IOException("boot_role_still_busy");
+            role = "1";
         }
         public void configuration(String value) { calls.add("config:" + value); config = value; }
         public void power(String value) throws IOException {

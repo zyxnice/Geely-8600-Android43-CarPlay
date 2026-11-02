@@ -178,16 +178,6 @@ object AirPlayPersistence {
             .putBoolean("geely_h52_navigation_alert", enabled).apply()
     }
 
-    /** False shares media focus without an app-initiated navigation duck request; output stays on 11. */
-    fun loadNavigationDuckingEnabled(context: Context): Boolean =
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
-            .getBoolean("navigation_ducking_enabled", false)
-
-    fun saveNavigationDuckingEnabled(context: Context, enabled: Boolean) {
-        context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
-            .putBoolean("navigation_ducking_enabled", enabled).apply()
-    }
-
     fun loadGeelyBluetoothDiagnosticsEnabled(context: Context): Boolean =
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
             .getBoolean("geely_h52_bluetooth_diagnostics_enabled", false)

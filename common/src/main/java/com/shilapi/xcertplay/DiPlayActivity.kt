@@ -397,14 +397,7 @@ class DiPlayActivity : ComponentActivity() {
         }
         section(content, getString(R.string.audio_routing)) { card ->
             geelyAudioControl(card)
-            if (AirPlayPersistence.loadGeelyAudioRouting(this) && com.shilapi.xcertplay.media.GeelyAudioCapabilities.detect() != null) {
-                toggle(card, getString(R.string.navigation_ducking_title),
-                    getString(R.string.navigation_ducking_description),
-                    AirPlayPersistence.loadNavigationDuckingEnabled(this)) {
-                    AirPlayPersistence.saveNavigationDuckingEnabled(this, it)
-                    if (CarPlayBackgroundSession.hasSession()) connect(AirPlayPersistence.loadWirelessEnabled(this))
-                }
-            } else {
+            if (!AirPlayPersistence.loadGeelyAudioRouting(this) || com.shilapi.xcertplay.media.GeelyAudioCapabilities.detect() == null) {
                 toggle(card, getString(R.string.contrib_audio_home_toggle_audio_focus), getString(R.string.contrib_audio_home_toggle_audio_focus_desc), AirPlayPersistence.loadAudioFocusEnabled(this)) { AirPlayPersistence.saveAudioFocusEnabled(this, it) }
             }
             if (resources.getBoolean(R.bool.config_advanced_audio_channel_mapping)) {

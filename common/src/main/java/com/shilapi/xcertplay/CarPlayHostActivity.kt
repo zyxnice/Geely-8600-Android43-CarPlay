@@ -332,7 +332,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var advancedAudioChannelMapping = false
     private var geelyAudioRouting = false
     private var geelyNavigationAlert = false
-    private var navigationDuckingEnabled = false
     private var geelyBluetoothEnabled = false
     private var navigationStreamType = 14
     private var debugLogsEnabled = false
@@ -539,7 +538,6 @@ class CarPlayHostActivity : ComponentActivity() {
                 AirPlayPersistence.loadAdvancedAudioChannelMapping(this)
         geelyAudioRouting = AirPlayPersistence.loadGeelyAudioRouting(this)
         geelyNavigationAlert = AirPlayPersistence.loadGeelyNavigationAlert(this)
-        navigationDuckingEnabled = AirPlayPersistence.loadNavigationDuckingEnabled(this)
         geelyBluetoothEnabled = AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this)
         navigationStreamType = AirPlayPersistence.loadNavigationStreamType(this)
         debugLogsEnabled = AirPlayPersistence.loadDebugLogsEnabled(this)
@@ -806,12 +804,9 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun reloadGeelyAudioSettingsIfChanged(): Boolean {
         val routing = AirPlayPersistence.loadGeelyAudioRouting(this)
         val alert = AirPlayPersistence.loadGeelyNavigationAlert(this)
-        val ducking = AirPlayPersistence.loadNavigationDuckingEnabled(this)
-        if (routing == geelyAudioRouting && alert == geelyNavigationAlert &&
-            ducking == navigationDuckingEnabled) return false
+        if (routing == geelyAudioRouting && alert == geelyNavigationAlert) return false
         geelyAudioRouting = routing
         geelyNavigationAlert = alert
-        navigationDuckingEnabled = ducking
         return true
     }
 
@@ -2010,7 +2005,6 @@ class CarPlayHostActivity : ComponentActivity() {
         AirPlayPersistence.saveAdvancedAudioChannelMapping(this, advancedAudioChannelMapping)
         AirPlayPersistence.saveGeelyAudioRouting(this, geelyAudioRouting)
         AirPlayPersistence.saveGeelyNavigationAlert(this, geelyNavigationAlert)
-        AirPlayPersistence.saveNavigationDuckingEnabled(this, navigationDuckingEnabled)
         AirPlayPersistence.saveDisplayScaleTenths(this, displayScaleTenths)
         AirPlayPersistence.saveFps(this, fps)
         AirPlayPersistence.saveWidthPhysicalMm(this, widthPhysicalMm)
@@ -3494,7 +3488,6 @@ class CarPlayHostActivity : ComponentActivity() {
             navigationChannel = AirPlayPersistence.loadNavigationAudioChannel(this),
             geelyAudioRouting = geelyAudioRouting,
             geelyNavigationAlert = geelyNavigationAlert,
-            navigationDuckingEnabled = navigationDuckingEnabled,
             context = this,
             navigationStreamType = navigationStreamType,
             onScreenStreamActiveChanged = { type, active ->
@@ -3583,8 +3576,7 @@ class CarPlayHostActivity : ComponentActivity() {
                         return@runOnUiThread
                     }
                     activeScreenStreamTypes.clear()
-                    setConnectionStage(getString(R.string.transport_error_reconnecting))
-                    recordExplicitFailure(message)
+                    renderConnectionStatus(CarPlayStatus.Failed(message), getString(R.string.transport_error_reconnecting))
                     appendLog("CarPlay transport error: $message; reconnecting from scratch")
                     reconnectAfterLoss("CarPlay transport error: $message")
                 }
@@ -3958,7 +3950,14 @@ class CarPlayHostActivity : ComponentActivity() {
         if (reconnectScheduled) return
         reconnectScheduled = true
         val generation = restartGeneration
-        val delayMillis = if (reason.contains("AirPlay iAP tunnel", ignoreCase = true)) {
+        val delayMillis = if (WiredStartupRecovery.fastRetry(
+                wired = !wirelessEnabled,
+                mediaActive = activeAirPlaySession != null || activeScreenStreamTypes.isNotEmpty(),
+                attempts = reconnectAttempts,
+                reason = reason,
+            )) {
+            1_000L
+        } else if (reason.contains("AirPlay iAP tunnel", ignoreCase = true)) {
             IAP_TUNNEL_RECONNECT_DELAY_MILLIS
         } else {
             (RECONNECT_DELAY_MILLIS * (1L shl reconnectAttempts.coerceAtMost(4))).coerceAtMost(30_000L)
@@ -4035,8 +4034,7 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!validateManualHotspotSettings()) return
         val h52AudioChanged =
             AirPlayPersistence.loadGeelyAudioRouting(this) != geelyAudioRouting ||
-                AirPlayPersistence.loadGeelyNavigationAlert(this) != geelyNavigationAlert ||
-                AirPlayPersistence.loadNavigationDuckingEnabled(this) != navigationDuckingEnabled
+                AirPlayPersistence.loadGeelyNavigationAlert(this) != geelyNavigationAlert
         persistMenuSettings()
         settingsBaseline = null
         finishSettingsMenu("Settings saved", restartForAudioChange = h52AudioChanged)
@@ -4456,8 +4454,8 @@ class CarPlayHostActivity : ComponentActivity() {
             "The control connection is ready; preparing the network path.",
         )
         CarPlayStatus.RunningControl -> connectionUiText(
-            "CarPlay 控制通道已运行，正在等待媒体会话。",
-            "The CarPlay control channel is running; waiting for the media session.",
+            "正在建立 iPhone 的画面与声音连接。若数据通道未就绪或手机未建立连接，将自动重试。",
+            "Connecting iPhone video and audio. A data-path or connection timeout will trigger a retry.",
         )
         CarPlayStatus.ControlEnded -> connectionUiText(
             "控制连接已结束。请查看右侧日志中的后续状态。",

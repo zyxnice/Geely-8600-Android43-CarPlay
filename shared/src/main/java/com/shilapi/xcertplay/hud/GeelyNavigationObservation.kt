@@ -55,7 +55,9 @@ internal class GeelyNavigationObservation internal constructor(log: (String) -> 
         if (closed || connectionGeneration < ownerRun) return -1L
         if (!clockStarted && !failed) {
             clockStarted = true
-            timer.scheduleWithFixedDelay({ submit { observer.tick() } }, 1, 1, TimeUnit.SECONDS)
+            // Observe the one-second maneuver handoff deadline within the next 100 ms clock tick.
+            // Unchanged candidates are not rebroadcast by the output policy.
+            timer.scheduleWithFixedDelay({ submit { observer.tick() } }, 100, 100, TimeUnit.MILLISECONDS)
         }
         ownerRun = connectionGeneration
         val token = ++generation

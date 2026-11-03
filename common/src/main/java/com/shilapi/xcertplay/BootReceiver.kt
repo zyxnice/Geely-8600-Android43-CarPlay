@@ -9,6 +9,13 @@ import android.util.Log
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action != Intent.ACTION_BOOT_COMPLETED) return
+        if (com.shilapi.xcertplay.hud.GeelyHudTrialSettings.available(context)) {
+            try {
+                context.startService(Intent(context, GeelyHudRecoveryService::class.java))
+            } catch (error: RuntimeException) {
+                Log.e(TAG, "HUD boot recovery could not start; retry on next DiPlay launch", error)
+            }
+        }
         val launchEnabled = AirPlayPersistence.loadAutoStartOnBoot(context)
         StartupDiagnosticSnapshot.received(context, launchEnabled)
         if (!launchEnabled) return

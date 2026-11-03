@@ -4,6 +4,8 @@
 
 ## 8600 车测变体
 
+2026-11-03 HUD 独占候选已完成 shared/common 874项测试（871通过、3项既有跳过）、geelyUsb/debug 构建与包体校验，尚未装车；详见[候选记录](HUD-EXCLUSIVE-20261103.md)。独占默认开启，HUD 总开关保存已有选择。下面11月1日的成绩和默认关闭说明只描述历史基线。
+
 2026-11-01 已合入的实装基线为 USB3-B/output3 + VPN + USB r2 + HUD trial2，详见[当前状态](GEELY-8600-STATUS.md)。构建本基线需显式选择 B：
 
 ```powershell

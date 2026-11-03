@@ -57,6 +57,15 @@ final class GeelyUsbOemBridge {
         throw new IOException(failure.find() ? failure.group(1) : "vpn_no_verified_response");
     }
 
+    /** Detach the lease watcher so it never holds the shared OEM Binder during navigation. */
+    void startHudExclusive(File dex, String operation, String nonce, String boot) throws IOException {
+        if (!("watch".equals(operation) || "recover".equals(operation)) || !nonce.matches("[a-f0-9]{32}")
+                || !GeelyVpnConsentPolicy.validBootId(boot)) throw new IOException("hud_arguments");
+        String command = buildHelperCommand(dex, new File(dex.getParentFile(), "runtime"),
+                GeelyHudExclusiveHelper.ENTRY_POINT, new String[] {operation, nonce, boot});
+        execute(command + " </dev/null >/dev/null 2>&1 &");
+    }
+
     private String execute(String command) throws IOException {
         Parcel input = Parcel.obtain();
         Parcel output = Parcel.obtain();

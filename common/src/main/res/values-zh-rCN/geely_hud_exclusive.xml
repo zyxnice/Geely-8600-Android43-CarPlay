@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="geely_hud_exclusive_title">HUD 独占模式</string>
+    <string name="geely_hud_exclusive_description">CarPlay 导航期间临时禁用原车高德，结束后恢复原状态。独占期间原车语音导航不可用。关闭此开关也会停止 HUD 输出。</string>
+    <string name="geely_hud_restore">停止 HUD 并恢复原车导航</string>
+    <string name="geely_hud_exclusive_off">独占模式已关闭。</string>
+    <string name="geely_hud_exclusive_waiting">等待 CarPlay 开始导航。</string>
+    <string name="geely_hud_exclusive_starting">正在准备独占，HUD 暂不输出。</string>
+    <string name="geely_hud_exclusive_active">原车高德已临时禁用，CarPlay 正在独占 HUD。</string>
+    <string name="geely_hud_exclusive_absent">未安装原车高德，无需隔离。</string>
+    <string name="geely_hud_exclusive_disabled">原车高德原本已禁用，保持原状态。</string>
+    <string name="geely_hud_exclusive_restoring">正在恢复原车导航…</string>
+    <string name="geely_hud_exclusive_restored">恢复处理已完成，原车导航保持接管前状态。</string>
+    <string name="geely_hud_exclusive_failed">独占或恢复失败，请停止 HUD 并重试恢复原车导航。</string>
+</resources>

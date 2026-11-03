@@ -5,6 +5,70 @@ import org.junit.Test
 import java.io.IOException
 
 class GeelyHudTrialPolicyTest {
+    @Test fun `pending isolation prevents begin and allows the same route when ready`() {
+        val f = Fixture()
+        f.exclusive = false
+        repeat(3) { f.policy.update(f.frame()) }
+        assertTrue(f.events.isEmpty())
+        assertTrue(f.enabled)
+        f.exclusive = true
+        f.policy.update(f.frame())
+        assertEquals(listOf("begin", "guide:250"), f.events)
+    }
+
+    @Test fun `route end clears before returning stock navigation ownership`() {
+        val f = Fixture()
+        f.recordRelease = true
+        f.policy.update(f.frame())
+        f.policy.update(null)
+        assertEquals(listOf("begin", "guide:250", "end", "release"), f.events)
+    }
+
+    @Test fun `lost isolation clears without continuing competing guidance`() {
+        val f = Fixture()
+        f.policy.update(f.frame())
+        f.exclusive = false
+        f.policy.update(f.frame().copy(distanceMeters = 200))
+        f.policy.update(f.frame().copy(distanceMeters = 100))
+        assertEquals(listOf("begin", "guide:250", "end"), f.events)
+    }
+
+    @Test fun `manual HUD disable clears before lease release`() {
+        val f = Fixture()
+        f.recordRelease = true
+        f.policy.update(f.frame())
+        f.enabled = false
+        f.policy.update(f.frame())
+        assertEquals(listOf("begin", "guide:250", "end", "release"), f.events)
+    }
+
+    @Test fun `disconnect releases isolation even if receiver identity is lost`() {
+        val f = Fixture()
+        f.recordRelease = true
+        f.policy.update(f.frame())
+        f.verified = false
+        f.policy.close()
+        assertTrue(f.events.last() == "release")
+        assertFalse(f.events.contains("end"))
+    }
+
+    @Test fun `failed clear completes bounded attempts before restoring and never clears afterwards`() {
+        val f = Fixture()
+        f.recordRelease = true
+        f.policy.update(f.frame())
+        f.failEnd = true
+        f.policy.update(null)
+        assertFalse(f.events.contains("release"))
+        f.policy.update(null)
+        assertFalse(f.events.contains("release"))
+        f.policy.update(null)
+        assertEquals(3, f.events.count { it == "end" })
+        assertEquals("release", f.events.last())
+        repeat(5) { f.policy.update(null) }
+        f.policy.close()
+        assertEquals(3, f.events.count { it == "end" })
+    }
+
     @Test fun `enabled output starts directly without factory navigation evidence`() {
         val f = Fixture()
         f.policy.update(null)
@@ -165,6 +229,8 @@ class GeelyHudTrialPolicyTest {
     }
 
     private class Fixture {
+        var exclusive = true
+        var recordRelease = false
         var enabled = true
         var verified = true
         var now = 1_000_000_000L
@@ -180,7 +246,8 @@ class GeelyHudTrialPolicyTest {
         }, { enabled }, { enabled = false }, {
             receiverChecks++
             verified
-        }, logs::add, { now })
+        }, logs::add, { now }, exclusiveReady = { exclusive },
+            releaseExclusive = { if (recordRelease) events += "release" })
 
         fun frame() = GeelyNavigationFrame(2, 0, 250, "人民路", null, null, now)
     }

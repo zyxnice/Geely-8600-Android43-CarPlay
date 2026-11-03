@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="geely_hud_exclusive_title">HUD exclusive mode</string>
+    <string name="geely_hud_exclusive_description">Temporarily disable stock AMap during CarPlay navigation, then restore its previous state. Stock voice navigation is unavailable while isolated. Turning this off also stops HUD output.</string>
+    <string name="geely_hud_restore">Stop HUD and restore stock navigation</string>
+    <string name="geely_hud_exclusive_off">Exclusive mode is off.</string>
+    <string name="geely_hud_exclusive_waiting">Waiting for CarPlay navigation.</string>
+    <string name="geely_hud_exclusive_starting">Preparing exclusive access; HUD output is waiting.</string>
+    <string name="geely_hud_exclusive_active">Stock AMap is temporarily disabled. CarPlay owns HUD output.</string>
+    <string name="geely_hud_exclusive_absent">Stock AMap is not installed. No isolation is needed.</string>
+    <string name="geely_hud_exclusive_disabled">Stock AMap was already disabled. Its state is preserved.</string>
+    <string name="geely_hud_exclusive_restoring">Restoring stock navigation…</string>
+    <string name="geely_hud_exclusive_restored">Recovery complete. Stock navigation retains its previous state.</string>
+    <string name="geely_hud_exclusive_failed">Exclusive access or recovery failed. Stop HUD and retry restoring stock navigation.</string>
+</resources>

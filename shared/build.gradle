@@ -80,8 +80,6 @@ def compileGeelyUsbHelper = tasks.register('compileGeelyUsbHelper', JavaCompile)
         'src/main/java/com/shilapi/xcertplay/compat/GeelyUsbFdHelper.java',
         'src/main/java/com/shilapi/xcertplay/compat/GeelyUsbRuntimeHelper.java',
         'src/main/java/com/shilapi/xcertplay/compat/GeelyVpnConsentHelper.java',
-        'src/main/java/com/shilapi/xcertplay/compat/GeelyHudExclusiveHelper.java',
-        'src/main/java/com/shilapi/xcertplay/compat/GeelyHudExclusivePolicy.java',
         'src/main/java/com/shilapi/xcertplay/compat/GeelyVpnConsentPolicy.java',
         'src/main/java/com/shilapi/xcertplay/compat/GeelyUsbRuntimePolicy.java',
         'src/main/java/com/shilapi/xcertplay/compat/GeelyUsbIdentity.java',

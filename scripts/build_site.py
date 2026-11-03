@@ -9,7 +9,7 @@ data = json.loads((SITE / 'content.json').read_text(encoding='utf-8'))
 BASE = 'https://zyxnice.github.io/Geely-8600-Android43-CarPlay/'
 DEFAULT_LANGUAGE = 'zh-Hans'
 REPO = 'https://github.com/zyxnice/Geely-8600-Android43-CarPlay'
-DOWNLOAD = REPO + '/blob/main/docs/HUD-EXCLUSIVE-20261103.md'
+DOWNLOAD = REPO + '/blob/main/docs/GEELY-8600-STATUS.md'
 NOTES = REPO + '/blob/main/docs/GEELY-8600-STATUS.md'
 for lang, d in data.items():
     folder = SITE if lang == DEFAULT_LANGUAGE else SITE / lang

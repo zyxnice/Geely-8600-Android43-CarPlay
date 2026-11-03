@@ -4,13 +4,12 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import com.shilapi.xcertplay.compat.GeelyHudExclusiveControl
 import java.io.FileInputStream
 import java.security.MessageDigest
 
 /**
- * Guidance uses only the stock receiver. The separate exclusive controller manages stock AMap's
- * enabled state; it never sends vehicle data. Dispatch is not physical HUD acceptance.
+ * H53 experiment through the stock exported receiver, never the USB/root bridge or a raw vehicle
+ * transport. A successful Android dispatch is not a receiver acknowledgement or HUD acceptance.
  */
 internal class GeelyHudTrialOutput(
     context: Context,
@@ -33,8 +32,6 @@ internal class GeelyHudTrialOutput(
         receiverReady = ::receiverReady,
         log = log,
         status = { GeelyHudTrialSettings.report(ownerToken, it) },
-        exclusiveReady = { GeelyHudExclusiveControl.ready(app, ownerToken) },
-        releaseExclusive = { GeelyHudExclusiveControl.release(ownerToken) },
     )
 
     /** Called on the existing bounded navigation worker, including its one-second freshness tick. */
@@ -52,14 +49,12 @@ internal class GeelyHudTrialOutput(
             log("geely HUD trial close failed: ${error.javaClass.simpleName}; physical clear unverified")
         } finally {
             closed = true
-            GeelyHudExclusiveControl.release(ownerToken)
             GeelyHudTrialSettings.release(ownerToken)
         }
     }
 
     private fun dispatch(fields: Map<String, Any>, requireConsent: Boolean) {
-        check(!closed && currentGeneration(channel) && GeelyHudExclusiveControl.allowsDispatch(ownerToken) &&
-            GeelyHudTrialSettings.owns(ownerToken) &&
+        check(!closed && currentGeneration(channel) && GeelyHudTrialSettings.owns(ownerToken) &&
             (!requireConsent || GeelyHudTrialSettings.acquire(app, ownerToken)) &&
             receiverReady()) {
             "factory_receiver_unavailable"
@@ -72,7 +67,7 @@ internal class GeelyHudTrialOutput(
         }
         // Channel replacement can race the preceding identity checks. Recheck immediately
         // before Binder dispatch; a Binder call already in progress cannot be recalled.
-        check(currentGeneration(channel) && GeelyHudExclusiveControl.allowsDispatch(ownerToken)) { "stale_navigation_channel" }
+        check(currentGeneration(channel)) { "stale_navigation_channel" }
         app.sendBroadcast(intent)
     }
 

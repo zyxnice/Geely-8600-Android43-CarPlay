@@ -4,15 +4,15 @@
 
 ## 8600 车测变体
 
-2026-11-03 HUD 独占候选已完成 shared/common 874项测试（871通过、3项既有跳过）、geelyUsb/debug 构建与包体校验，尚未装车；详见[候选记录](HUD-EXCLUSIVE-20261103.md)。独占默认开启，HUD 总开关保存已有选择。
+2026-11-04：用户已卸载原车高德并反馈 HUD 不闪，要求撤销独占模式。当前源码恢复到独占引入前的 5833883 行为，保留 HUD、媒体23／导航11、USB与媒体修复；不再禁用或恢复原车应用，不要求重新安装高德。本次未操作车机。
 
-当前候选继承 audio-mix-rollback 的音频及 USB／媒体行为，实际已安装身份另见[当前状态](GEELY-8600-STATUS.md)。构建专用 B 变体需显式选择 B：
+当前源码保留 audio-mix-rollback 的音频及 USB／媒体行为，实际安装身份见[当前状态](GEELY-8600-STATUS.md)。构建专用 B 变体需显式选择 B：
 
 ```powershell
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb '-PgeelyPerformanceStage=B'
 ```
 
-shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD真实显示与异常恢复依赖独立实车验收。11月1日trial2的817项测试和默认关闭行为保留在[历史状态](GEELY-8600-STATUS.md)，不描述当前独占候选。
+shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD真实显示与异常恢复依赖独立实车验收。11月1日trial2的817项测试和默认关闭行为保留在[历史状态](GEELY-8600-STATUS.md)，不描述当前源码。
 
 使用仓库内 Gradle wrapper；以下命令在 Windows PowerShell 仓库根目录执行：
 

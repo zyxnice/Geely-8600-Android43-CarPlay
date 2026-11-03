@@ -9,7 +9,7 @@ internal interface GeelyHudTrialPort {
 
 /**
  * One enabled controller's output. All calls are serialized; the user selects CarPlay as the sole
- * navigation source. A separate exclusive controller verifies/restores the factory app state.
+ * navigation source. Factory navigation state is intentionally outside this policy.
  */
 internal class GeelyHudTrialPolicy(
     private val port: GeelyHudTrialPort,
@@ -19,8 +19,6 @@ internal class GeelyHudTrialPolicy(
     private val log: (String) -> Unit,
     private val nanoTime: () -> Long = System::nanoTime,
     private val status: (GeelyHudTrialStatus) -> Unit = {},
-    private val exclusiveReady: () -> Boolean = { true },
-    private val releaseExclusive: () -> Unit = {},
 ) {
     private var ownsOutput = false
     private var lastFrame: GeelyNavigationFrame? = null
@@ -32,7 +30,7 @@ internal class GeelyHudTrialPolicy(
 
     @Synchronized fun update(frame: GeelyNavigationFrame?) {
         if (closed) return
-        if (!ownsOutput && !enabled()) { releaseExclusive(); return }
+        if (!ownsOutput && !enabled()) return
         if (failed && enabled()) {
             revoke()
             status(GeelyHudTrialStatus.RECONNECT_REQUIRED)
@@ -45,16 +43,9 @@ internal class GeelyHudTrialPolicy(
         if (failed || !enabled() || !publishable(frame)) {
             if (!failed && enabled() && ownsOutput) status(GeelyHudTrialStatus.STALE)
             clearOwned(if (failed) "output-failed" else if (!enabled()) "disabled" else "route-unavailable-or-invalid")
-            releaseAfterClear()
             return
         }
         try {
-            // Isolation is asynchronous. Waiting does not revoke HUD consent or start a route.
-            // A lost acknowledgement withdraws existing output while its helper restores AMap.
-            if (!exclusiveReady()) {
-                clearOwned("exclusive-unavailable")
-                return
-            }
             if (!ownsOutput) {
                 // Mark before dispatch: a thrown send does not prove the receiver saw nothing.
                 ownsOutput = true
@@ -80,7 +71,6 @@ internal class GeelyHudTrialPolicy(
             status(GeelyHudTrialStatus.SEND_FAILED)
             log("geely HUD trial output failed: ${error.javaClass.simpleName}")
             clearOwned("send-failure")
-            releaseAfterClear()
         }
     }
 
@@ -90,8 +80,6 @@ internal class GeelyHudTrialPolicy(
         if (ownsOutput) {
             if (receiverReady()) clearOwned("controller-closed") else abandon("receiver-unverified-on-close")
         }
-        releaseExclusive()
-        ownsOutput = false
         closed = true
     }
 
@@ -125,20 +113,11 @@ internal class GeelyHudTrialPolicy(
         }
     }
 
-    private fun releaseAfterClear() {
-        // A failed clear retains its lease through the bounded retry sequence. Once the factory
-        // app is restored, this controller must never send another late end to its shared HUD.
-        if (ownsOutput && clearAttempts < 3) return
-        ownsOutput = false
-        releaseExclusive()
-    }
-
     private fun abandon(reason: String) {
         if (ownsOutput || enabled()) log("geely HUD trial withdrawn reason=$reason; no end sent to shared receiver")
         ownsOutput = false
         lastFrame = null
         failed = true
         revoke()
-        releaseExclusive()
     }
 }

@@ -80,7 +80,6 @@ class DiPlayActivity : ComponentActivity() {
     private var status: TextView? = null
     private var geelyHudSwitch: Switch? = null
     private var geelyHudStatus: TextView? = null
-    private var geelyHudExclusiveStatus: TextView? = null
     private var geelyHudSyncing = false
     private var connectButton: Button? = null
     private var disconnectButton: Button? = null
@@ -134,7 +133,6 @@ class DiPlayActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.recover(applicationContext)
         languagePreferenceAtCreate = AppLocale.preference(this)
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
         WindowCompat.setDecorFitsSystemWindows(window, true)
@@ -230,7 +228,6 @@ class DiPlayActivity : ComponentActivity() {
         status = null; connectButton = null; disconnectButton = null; lastRunning = null
         geelyHudSwitch = null
         geelyHudStatus = null
-        geelyHudExclusiveStatus = null
         hotspotToolsStatusView = null
         val scroll = ScrollView(this).apply { setBackgroundColor(BG); isFillViewport = true; clipToPadding = false }
         val content = column().apply { setPadding(dp(32), dp(24), dp(32), dp(32)) }
@@ -434,16 +431,6 @@ class DiPlayActivity : ComponentActivity() {
                     refreshGeelyHudStatus()
                 }
                 geelyHudStatus = label("", 14, MUTED).also { card.addView(it) }
-                toggle(card, getString(R.string.geely_hud_exclusive_title), getString(R.string.geely_hud_exclusive_description),
-                    com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.enabled(this)) { enabled ->
-                    com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.setEnabled(this, enabled)
-                    refreshGeelyHudStatus()
-                }
-                geelyHudExclusiveStatus = label("", 14, MUTED).also { card.addView(it) }
-                card.addView(button(getString(R.string.geely_hud_restore), false) {
-                    com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.restoreNow(this)
-                    refreshGeelyHudStatus()
-                }, matchButton(10, 56))
                 refreshGeelyHudStatus()
             }
         }
@@ -1700,18 +1687,6 @@ class DiPlayActivity : ComponentActivity() {
             GeelyHudTrialStatus.RECONNECT_REQUIRED -> R.string.geely_hud_status_reconnect
         }
         geelyHudStatus?.text = getString(text)
-        val exclusiveText = when (com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.status(this)) {
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.OFF -> R.string.geely_hud_exclusive_off
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.WAITING -> R.string.geely_hud_exclusive_waiting
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.STARTING -> R.string.geely_hud_exclusive_starting
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.ISOLATED -> R.string.geely_hud_exclusive_active
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.ABSENT -> R.string.geely_hud_exclusive_absent
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.DISABLED -> R.string.geely_hud_exclusive_disabled
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.RESTORING -> R.string.geely_hud_exclusive_restoring
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.RESTORED -> R.string.geely_hud_exclusive_restored
-            com.shilapi.xcertplay.compat.GeelyHudExclusiveControl.Status.FAILED -> R.string.geely_hud_exclusive_failed
-        }
-        geelyHudExclusiveStatus?.text = getString(exclusiveText)
 
     }
 

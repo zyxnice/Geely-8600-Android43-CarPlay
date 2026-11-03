@@ -4,15 +4,15 @@
 
 ## 8600 车测变体
 
-2026-11-03 HUD 独占候选已完成 shared/common 874项测试（871通过、3项既有跳过）、geelyUsb/debug 构建与包体校验，尚未装车；详见[候选记录](HUD-EXCLUSIVE-20261103.md)。独占默认开启，HUD 总开关保存已有选择。下面11月1日的成绩和默认关闭说明只描述历史基线。
+2026-11-03 HUD 独占候选已完成 shared/common 874项测试（871通过、3项既有跳过）、geelyUsb/debug 构建与包体校验，尚未装车；详见[候选记录](HUD-EXCLUSIVE-20261103.md)。独占默认开启，HUD 总开关保存已有选择。
 
-2026-11-01 已合入的实装基线为 USB3-B/output3 + VPN + USB r2 + HUD trial2，详见[当前状态](GEELY-8600-STATUS.md)。构建本基线需显式选择 B：
+当前候选继承 audio-mix-rollback 的音频及 USB／媒体行为，实际已安装身份另见[当前状态](GEELY-8600-STATUS.md)。构建专用 B 变体需显式选择 B：
 
 ```powershell
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb '-PgeelyPerformanceStage=B'
 ```
 
-本候选完成817项测试（814通过、3项既有跳过）及geelyUsb/debug构建、APK兼容校验；shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD默认关闭，真实显示与异常恢复依赖独立实车验收。
+shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD真实显示与异常恢复依赖独立实车验收。11月1日trial2的817项测试和默认关闭行为保留在[历史状态](GEELY-8600-STATUS.md)，不描述当前独占候选。
 
 使用仓库内 Gradle wrapper；以下命令在 Windows PowerShell 仓库根目录执行：
 

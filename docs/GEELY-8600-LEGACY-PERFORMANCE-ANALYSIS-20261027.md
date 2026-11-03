@@ -1,10 +1,12 @@
 # DiPlay Legacy 流畅度源码分析与 8600 移植建议
 
+> 历史记录（2026-11-03分类核对）：下文保留该次试验／计划的事实与限制；“当前、最新、待安装、下一步”仅指记录当时，不代表今天的安装或验收状态。请先读[最新状态](GEELY-8600-STATUS.md)；本记录不授权继续执行旧现场操作。
+
 日期：2026-10-27。状态：静态分析完成，未移植性能代码、未构建参考项目、未采集或安装车机。
 
 ## 基线与保存位置
 
-- 原 P16 方案保留不变：[P16 执行方案](aegis/plans/2026-10-27-p16-performance-port.md)。它仍是计划，不代表已经实现。
+- 当时引用的 P16 执行方案路径为 `aegis/plans/2026-10-27-p16-performance-port.md`，该历史计划未归档在本公开仓库；本记录不证明其已经实现。
 - 自用项目：`zyxnice/DiPlay-Geely-Android43`，`main`，`f524611e3c2f2b064c765da0e63d061d035ad51b`。
 - 参考项目：`programmerguohuajing/DiPlay-Legacy-Android`。
 - 本次 fetch 后源码：`bec397e2a3bbf85a4ff3128be68dd2fcc810d18f`，mobile 版本 `0.3.2` / code `122`。

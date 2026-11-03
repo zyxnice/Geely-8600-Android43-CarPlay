@@ -26,7 +26,7 @@ body:
     attributes:
       label: 连接方式
       options: [USB, 无线, USB 和无线]
-      description: '当前优先 USB，USB 验收通过后优先推进 HUD 适配，无线连接列入后续规划；提供无线选项用于描述现场情况，不代表无线已完成验收。'
+      description: 'USB与HUD已进入实车验证；请区分当前已装包和未装车的HUD独占候选，并提供APK文件名或SHA。无线连接仍属后续规划，提供无线选项不代表已完成验收。'
     validations: {required: true}
   - type: textarea
     id: reproduce

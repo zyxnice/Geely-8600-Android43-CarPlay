@@ -1,5 +1,7 @@
 # 8600 HUD 接入续作
 
+> 历史记录（2026-11-03分类核对）：下文保留该次试验／计划的事实与限制；“当前、最新、待安装、下一步”仅指记录当时，不代表今天的安装或验收状态。请先读[最新状态](../../GEELY-8600-STATUS.md)；本记录不授权继续执行旧现场操作。
+
 目标：延续会话01a17711-981e-7b22-8fd2-1b4b1c337a93，将真实CarPlay导航的方向、下一路口距离和路名适配到吉利原厂HUD。保留已装USB两秒r2及VPN、output3媒体基线。上次只观测是前置工作，不代表HUD显示已实现。
 
 TaskStartSnapshot：HEAD aaec231/main，当前USB/VPN及output4诊断dirty状态已读取；本次切到独立分支codex/geely8600-hud-implementation-20261031，原有未提交改动保留。原HUD分支de6e049保留。原生worktree工具拒绝父目录工作区下的嵌套Git仓库，未用shell创建worktree；改用同仓库新分支，打包以已装r2源码为基线，避免混入output4。

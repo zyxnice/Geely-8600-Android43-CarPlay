@@ -9,8 +9,8 @@ data = json.loads((SITE / 'content.json').read_text(encoding='utf-8'))
 BASE = 'https://zyxnice.github.io/Geely-8600-Android43-CarPlay/'
 DEFAULT_LANGUAGE = 'zh-Hans'
 REPO = 'https://github.com/zyxnice/Geely-8600-Android43-CarPlay'
-RELEASE = REPO + '/releases'
-DOWNLOAD = RELEASE
+DOWNLOAD = REPO + '/blob/main/docs/HUD-EXCLUSIVE-20261103.md'
+NOTES = REPO + '/blob/main/docs/GEELY-8600-STATUS.md'
 for lang, d in data.items():
     folder = SITE if lang == DEFAULT_LANGUAGE else SITE / lang
     folder.mkdir(exist_ok=True)
@@ -29,10 +29,10 @@ for lang, d in data.items():
 <section class="hero"><span class="badge">{e(d['badge'])}</span><h1>{e(d['title']).replace(chr(10),'<br>')}</h1><p class="intro">{e(d['intro'])}</p><div class="actions"><a class="button" href="{DOWNLOAD}">{e(d['download'])} <span aria-hidden="true">↓</span></a><a class="button secondary" href="#install">{e(d['install'])}</a></div><p class="promise">{e(d['promise'])}</p><p class="note">{e(d['requires'])}</p><p class="note support-scope"><strong>{e(d['supportScope'])}</strong></p></section>
 <section class="gallery"><h2>{e(d['gallery'])}</h2><div class="screens">{pics}</div></section>
 <div class="grid"><section class="card" id="install"><span class="eyebrow">01</span><h2>{e(d['setup'])}</h2><ol>{''.join('<li>'+e(x)+'</li>' for x in d['steps'])}</ol><p class="note">{e(d['bssid'])}</p><a href="{REPO}/blob/main/docs/INSTALL.md">{e(d['adb'])} ↗</a></section>
-<section class="card"><span class="eyebrow">02</span><h2>{e(d['whats'])}</h2><ul>{''.join('<li>'+e(x)+'</li>' for x in d['features'])}</ul><a href="{RELEASE}">{e(d['notes'])} ↗</a><h3>{e(d['compat'])}</h3><p>{e(d['compatText'])}</p></section></div>
+<section class="card"><span class="eyebrow">02</span><h2>{e(d['whats'])}</h2><ul>{''.join('<li>'+e(x)+'</li>' for x in d['features'])}</ul><a href="{NOTES}">{e(d['notes'])} ↗</a><h3>{e(d['compat'])}</h3><p>{e(d['compatText'])}</p></section></div>
 <section class="card updates"><div><h2>{e(d['follow'])}</h2><p>{e(d['followText'])}</p></div><a class="button secondary" href="{REPO}">{e(d['source'])} ↗</a></section>
 <section class="signing"><h2>{e(d['update'])}</h2><p>{e(d['updateText'])}</p></section>
-<footer><nav><a href="{REPO}/blob/main/docs/PRIVACY.md">{e(d["privacy"])}</a><a href="{REPO}">{e(d['source'])}</a><a href="{RELEASE}">{e(d['notes'])}</a><a href="{REPO}/issues">{e(d['feedback'])}</a></nav><p>{e(d['footer'])}</p></footer>
+<footer><nav><a href="{REPO}/blob/main/docs/PRIVACY.md">{e(d["privacy"])}</a><a href="{REPO}">{e(d['source'])}</a><a href="{NOTES}">{e(d['notes'])}</a><a href="{REPO}/issues">{e(d['feedback'])}</a></nav><p>{e(d['footer'])}</p></footer>
 </main></body></html>''', encoding='utf-8')
 print('Generated', len(data), 'language pages')
 

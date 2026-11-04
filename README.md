@@ -26,13 +26,13 @@
 | HUD 闪烁 | 行驶隔离确认原车高德的零值数据与 CarPlay 竞争覆盖；禁用后上下两处均不闪。用户随后自行卸载高德，反馈当前不再闪烁。 |
 | 卸载原车高德后讯飞重试 | 讯飞约每 2 秒尝试绑定缺失的导航服务。已装独立兼容 APK，实车重启后讯飞自动绑定，连续 65 秒未再出现该重试。[解决方案与源码](docs/OEM-APP-REMOVAL.md#讯飞导航服务) · [下载独立桥接 APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/navigation-bridge-v1.0-20261103/Geely-NavigationBridge-1.0-20261103-66f37f2d008a.apk) |
 | 卸载原车会员中心 | 在线移除后，系统仍反复尝试拉起原常驻服务，产生额外后台工作。实车重启后采样未再观察到会员中心启动，CPU 影响尚无同条件对照。[排查与处理记录](docs/OEM-APP-REMOVAL.md#会员中心) |
-| 当前源码 | 已撤销 HUD 独占模式，恢复独占前 5833883 的应用逻辑；HUD、音频及 USB 修复保留。 |
-| 最近核实的车上版本 | `audio-mix-rollback`，SHA-256 前缀 `9d2283914adc`；本次未操作车机。 |
+| 当前源码 | 收录 USB 流畅度里程碑：PCM、USB、TLS 缓冲复用及帧时序诊断；HUD 独占保持撤销。 |
+| 最近核实的车上版本 | `tls-read-scratch`，SHA-256 前缀 `7ef58d64cb92`；用户认可大部分滑动明显改善，仍偶发长停顿。[里程碑与下载](docs/USB-SMOOTHNESS-MILESTONE-20261104.md) |
 | 导航声音 | 保留原厂媒体23／导航11，用户已确认导航出声及方向盘调节声音；本次撤销未改音频逻辑。 |
 | 已撤回候选 | 独占包 `44e915ea0b0c` 不再推荐安装；其测试与交付证据仅作历史记录。 |
 | 尚待实车验证 | USB重复启动和长测、VPN重启授权问题仍保留。 |
 
-2026-11-04：用户已卸载原车高德并反馈 HUD 不闪，要求撤销独占模式。当前源码恢复到独占引入前的 5833883 行为，保留 HUD、媒体23／导航11、USB与媒体修复；不再禁用或恢复原车应用，不要求重新安装高德。本次未操作车机。
+此前 HUD 调整（2026-11-04）：用户卸载原车高德并反馈 HUD 不闪后，已撤销独占模式，恢复独占前的 HUD 行为，不再禁用或恢复原车应用。此次流畅度里程碑继续保留该行为、媒体23／导航11及既有 USB 修复。
 
 [完整状态与历史记录](docs/GEELY-8600-STATUS.md) · [HUD 使用说明](docs/GEELY-8600-HUD.md)
 
@@ -46,7 +46,7 @@
 
 ## 下载、安装与反馈
 
-正式发布包查看[本仓库 Releases](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases)。[HUD 独占测试包](docs/HUD-EXCLUSIVE-20261103.md)已按用户要求撤回，不再推荐下载或安装。本次撤销未发布新 APK。原上游 APK、H52 的 P21/P22 包以及其他车型的包不是星越 8600 的推荐下载。
+当前 [USB 流畅度里程碑](docs/USB-SMOOTHNESS-MILESTONE-20261104.md)发布已装车的原始 APK；完整版本见[本仓库 Releases](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases)。[HUD 独占测试包](docs/HUD-EXCLUSIVE-20261103.md)已撤回。里程碑仍有偶发长停顿，属于预发布；原上游 APK、H52 的 P21/P22 包以及其他车型的包不是星越 8600 的推荐下载。
 
 公开源码树已移除旧 H52/P21 安装包，保留其历史说明与源码快照供追溯；不改写 Git 历史。
 

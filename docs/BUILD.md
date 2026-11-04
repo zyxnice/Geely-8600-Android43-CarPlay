@@ -4,9 +4,9 @@
 
 ## 8600 车测变体
 
-2026-11-04：用户已卸载原车高德并反馈 HUD 不闪，要求撤销独占模式。当前源码恢复到独占引入前的 5833883 行为，保留 HUD、媒体23／导航11、USB与媒体修复；不再禁用或恢复原车应用，不要求重新安装高德。本次未操作车机。
+2026-11-04：HUD 独占模式已按用户要求撤销，当前流畅度里程碑保留独占前的 HUD 行为、媒体23／导航11及既有 USB 修复；不再禁用或恢复原车应用，不要求重新安装高德。
 
-当前源码保留 audio-mix-rollback 的音频及 USB／媒体行为，实际安装身份见[当前状态](GEELY-8600-STATUS.md)。构建专用 B 变体需显式选择 B：
+当前源码在既有音频及 USB／媒体行为上收录 [USB 流畅度里程碑](USB-SMOOTHNESS-MILESTONE-20261104.md)的缓冲复用及帧时序诊断，实际安装身份见[当前状态](GEELY-8600-STATUS.md)。构建专用 B 变体需显式选择 B：
 
 ```powershell
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb '-PgeelyPerformanceStage=B'

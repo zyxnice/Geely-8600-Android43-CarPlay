@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.media.VideoFrameTrace
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.Closeable
 import java.io.File
@@ -20,6 +21,8 @@ interface MediaSink {
     fun onVideoFrame(type: Int, naluBytes: ByteArray) {}
     /** Monotonic receive time from System.nanoTime; C includes decrypt-queue time in its decoder age limit. */
     fun onVideoFrame(type: Int, naluBytes: ByteArray, receivedNs: Long) = onVideoFrame(type, naluBytes)
+    /** B diagnostic overload; does not substitute wire-read time for the existing decoder age origin. */
+    fun onVideoFrame(type: Int, naluBytes: ByteArray, trace: VideoFrameTrace) = onVideoFrame(type, naluBytes)
     /** Ordered before the next frame after receive-side loss; the decoder must wait for a new keyframe. */
     fun onVideoDiscontinuity(type: Int, reason: String) {}
     fun setVideoRecoveryHandler(type: Int, handler: () -> Unit) {}
@@ -116,6 +119,9 @@ class CarPlayMediaEngine(
                 }
                 override fun onFrame(naluBytes: ByteArray, receivedNs: Long) {
                     if (streams[streamKey] === screen) sink.onVideoFrame(type, naluBytes, receivedNs)
+                }
+                override fun onFrame(naluBytes: ByteArray, trace: VideoFrameTrace) {
+                    if (streams[streamKey] === screen) sink.onVideoFrame(type, naluBytes, trace)
                 }
                 override fun onDiscontinuity(reason: String) {
                     if (streams[streamKey] === screen) sink.onVideoDiscontinuity(type, reason)

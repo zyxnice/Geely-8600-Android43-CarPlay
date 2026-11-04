@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.media.VideoFrameTrace
 import com.shilapi.xcertplay.compat.GeelyMediaPerformance
 import java.io.Closeable
 import java.io.InputStream
@@ -30,6 +31,8 @@ class ScreenStream(
         fun onFrame(naluBytes: ByteArray) {}
         /** C preserves the original complete-message arrival time through both bounded queues. */
         fun onFrame(naluBytes: ByteArray, receivedNs: Long) { onFrame(naluBytes) }
+        /** B-only diagnostic metadata; default preserves the original B callback/age semantics. */
+        fun onFrame(naluBytes: ByteArray, trace: VideoFrameTrace) { onFrame(naluBytes) }
         /** A wire frame was dropped before decryption; the decoder must wait for a new keyframe. */
         fun onDiscontinuity(reason: String) {}
         fun onClosed(cause: Throwable?) {}
@@ -38,6 +41,8 @@ class ScreenStream(
     private val closed = AtomicBoolean(false)
     private val crypto = MediaFrameCrypto(performance.nativeMedia, onDiagnostic)
     private val frameCounter = AtomicLong(0)
+    private val traceStreamId = System.nanoTime()
+    private var traceSequence = 0L
     private val firstFrameLogged = AtomicBoolean(false)
     private val delivery = ScreenDeliveryGate()
     private val stateLock = Any()
@@ -125,12 +130,15 @@ class ScreenStream(
             val input = sock.getInputStream()
             while (!closed.get()) {
                 stats.reading()
+                val readBeginNs = if (performance.stage == "B") System.nanoTime() else 0L
                 val header = readFully(input, HEADER_LEN) ?: break
+                val headerDoneNs = if (readBeginNs != 0L) System.nanoTime() else 0L
                 val bodySize = readU32Le(header, 0)
                 if (bodySize > MAX_BODY) break
                 val body = readFully(input, bodySize) ?: break
+                val bodyDoneNs = if (readBeginNs != 0L) System.nanoTime() else 0L
                 stats.received(HEADER_LEN + bodySize)
-                onMessage(header, body, stats)
+                onMessage(header, body, stats, readBeginNs, headerDoneNs, bodyDoneNs)
                 stats.processed()
             }
         } catch (error: Exception) {
@@ -143,9 +151,11 @@ class ScreenStream(
         }
     }
 
-    private fun onMessage(header: ByteArray, body: ByteArray, stats: StreamReceiveStats) {
+    private fun onMessage(header: ByteArray, body: ByteArray, stats: StreamReceiveStats,
+        readBeginNs: Long = 0, headerDoneNs: Long = 0, bodyDoneNs: Long = 0) {
         when (header[OPCODE_OFFSET].toInt() and 0xff) {
             OP_VIDEO_FRAME -> {
+                val decryptBeginNs = if (readBeginNs != 0L) System.nanoTime() else 0L
                 val payload = if (body.size >= ScreenCodec.TAG_SIZE) {
                     val started = System.nanoTime()
                     try {
@@ -157,6 +167,8 @@ class ScreenStream(
                 } else {
                     body
                 }
+                val trace = if (readBeginNs != 0L) VideoFrameTrace(traceStreamId, ++traceSequence,
+                    body.size, readBeginNs, headerDoneNs, bodyDoneNs, decryptBeginNs, System.nanoTime()) else null
                 if (firstFrameLogged.compareAndSet(false, true)) {
                     Log.i(
                         TAG,
@@ -164,7 +176,10 @@ class ScreenStream(
                         "head=${payload.hexPrefix(16)}",
                     )
                 }
-                deliver { listener.onFrame(ScreenCodec.lengthPrefixedToAnnexB(payload)) }
+                deliver {
+                    val frame = ScreenCodec.lengthPrefixedToAnnexB(payload)
+                    if (trace == null) listener.onFrame(frame) else listener.onFrame(frame, trace)
+                }
             }
             OP_VIDEO_CONFIG -> {
                 val (codec, codecData) = ScreenCodec.detectConfig(body)

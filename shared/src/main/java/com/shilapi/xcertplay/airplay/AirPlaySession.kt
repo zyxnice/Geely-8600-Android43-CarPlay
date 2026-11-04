@@ -258,6 +258,23 @@ class AirPlaySession(
         sendCommand(linkedMapOf("type" to "requestSiri", "params" to linkedMapOf("siriAction" to 3)))
     }
 
+    private val phoneProbeReceipts = PhoneProbeReceipts()
+
+    /** Uses the OEM requestUI envelope over the existing authenticated event channel, once only. */
+    fun sendPhoneNavigationProbe(id: String, kind: String, latitude: Double?, longitude: Double?,
+                                 coordinateSystem: String?): Boolean {
+        val command = GeelyPhoneNavigationProbe.command(kind, latitude, longitude, coordinateSystem)
+        return synchronized(eventWriteLock) {
+            if (closed.get() || eventSocket == null || eventCipher == null) return@synchronized false
+            val cseq = eventCseq + 1
+            phoneProbeReceipts.sent(cseq, id)
+            val sent = sendCommandLocked(command)
+            if (!sent) phoneProbeReceipts.take(cseq)
+            Log.i("GeelyPhoneProbe", "id=$id kind=$kind cseq=$cseq written=$sent navigationExecuted=unknown")
+            sent
+        }
+    }
+
     fun sendIapMessage(data: ByteArray, timeoutMillis: Long = 0L): Boolean {
         require(timeoutMillis >= 0) { "timeoutMillis must not be negative" }
         val command = linkedMapOf<String, Any?>(
@@ -737,7 +754,15 @@ class AirPlaySession(
                 val parsed = RtspMessage.parseMessages(plaintext)
                 plaintext = parsed.rest
                 for (message in parsed.messages) {
-                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) continue
+                    if (message.method.startsWith("RTSP/") || message.method.startsWith("HTTP/")) {
+                        val cseq = message.headers["cseq"]?.toIntOrNull()
+                        val probeId = cseq?.let(phoneProbeReceipts::take)
+                        if (probeId != null) {
+                            Log.i("GeelyPhoneProbe", "id=$probeId cseq=$cseq phoneReply=${message.path} " +
+                                "bodyHex=${message.body.toHex()} navigationExecuted=unknown")
+                        }
+                        continue
+                    }
                     debugLog(
                         "airplay event rx ${message.method} ${message.path} cseq=${message.headers["cseq"] ?: "-"} body=${message.body.size}",
                     )

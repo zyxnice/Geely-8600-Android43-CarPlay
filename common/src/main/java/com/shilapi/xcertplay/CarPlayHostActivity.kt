@@ -4473,10 +4473,17 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val wide = isWideConnectionSurface()
         val mainVideoActive = SCREEN_TYPE_MAIN in activeScreenStreamTypes
+        val logsWereVisible = statusScrollView?.visibility == View.VISIBLE
         connectionPanel?.visibility =
             if (!wide && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         wideConnectionPanel?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
         statusScrollView?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
+        // Hidden panels retain their model/file history without rebuilding text layouts.
+        // Refresh once on reveal so a disconnect immediately shows current diagnostics.
+        refreshKeyDiagnosticsView()
+        if (!logsWereVisible && statusScrollView?.visibility == View.VISIBLE) {
+            refreshLogView(System.currentTimeMillis())
+        }
         updateLatestLogButton()
     }
 
@@ -4557,10 +4564,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val update = Runnable {
             if (hostUiDestroyed) return@Runnable
             keyDiagnostics.update(message)
-            keyDiagnosticsView?.apply {
-                text = keyDiagnostics.summary()
-                visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
-            }
+            refreshKeyDiagnosticsView()
             while (logLines.size >= MAX_VISIBLE_LOG_LINES) logLines.removeFirst()
             logLines.addLast(LogEntry(timestampMillis, formattedLogLine(message, timestampMillis)))
             if (!logRefreshScheduled) {
@@ -4573,6 +4577,15 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun formattedLogLine(message: String, nowMillis: Long): String =
         "${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))}  $message"
+
+    private fun refreshKeyDiagnosticsView() {
+        if (wideConnectionPanel?.visibility != View.VISIBLE) return
+        keyDiagnosticsView?.apply {
+            val summary = keyDiagnostics.summary()
+            if (text.toString() != summary) text = summary
+            visibility = if (summary.isEmpty()) View.GONE else View.VISIBLE
+        }
+    }
 
     private fun initializeSessionLog() {
         val logFile = File(File(filesDir, "logs"), "diplay.log")
@@ -4592,9 +4605,11 @@ class CarPlayHostActivity : ComponentActivity() {
         while (logLines.firstOrNull()?.timestampMillis?.let { it <= cutoff } == true) {
             logLines.removeFirst()
         }
-        statusView?.text = logLines.joinToString("\n") { it.text }
-        if (logFollowLatest) scrollLogsToBottom(force = true)
-        updateLatestLogButton()
+        if (statusScrollView?.visibility == View.VISIBLE) {
+            statusView?.text = logLines.joinToString("\n") { it.text }
+            if (logFollowLatest) scrollLogsToBottom(force = true)
+            updateLatestLogButton()
+        }
 
         mainHandler.removeCallbacks(expireOldLogLines)
         logLines.firstOrNull()?.let { oldest ->

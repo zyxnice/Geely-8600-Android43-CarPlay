@@ -23,9 +23,10 @@ public final class H52UsbReadPump {
  }
  private static final class Pump extends Thread {
   final UsbDeviceConnection connection; final UsbEndpoint endpoint;
-  final ArrayBlockingQueue<byte[]> packets=new ArrayBlockingQueue<>(64);
+  final ArrayBlockingQueue<UsbReadChunkPool.Chunk> packets=new ArrayBlockingQueue<>(64);
+  final UsbReadChunkPool chunkPool=new UsbReadChunkPool();
   final String devicePath; volatile boolean ended; volatile RuntimeException failure;
-  byte[] remaining; int position;
+  UsbReadChunkPool.Chunk remaining; int position;
   Pump(UsbDeviceConnection c,UsbEndpoint ep){
    super("h52-usb-read-"+ep.getAddress());setDaemon(true);connection=c;endpoint=ep;
    String path=null;try{String candidate=new File("/proc/self/fd/"+c.getFileDescriptor()).getCanonicalPath();if(candidate.startsWith("/dev/bus/usb/"))path=candidate;}catch(Exception ignored){}
@@ -41,8 +42,9 @@ public final class H52UsbReadPump {
    checkDevice();
    if(remaining==null){try{remaining=packets.poll(Math.max(1,timeout),TimeUnit.MILLISECONDS);position=0;}catch(InterruptedException e){Thread.currentThread().interrupt();throw new IllegalStateException("USB read interrupted",e);}}
    checkDevice(); if(remaining==null)return -1;
-   int count=Math.min(length,remaining.length-position);System.arraycopy(remaining,position,target,offset,count);position+=count;
-   if(position==remaining.length){remaining=null;position=0;}return count;
+   int count=Math.min(length,remaining.length-position);System.arraycopy(remaining.bytes,position,target,offset,count);position+=count;
+   // Return ownership only after the final copy, including when callers split a USB request.
+   if(position==remaining.length){chunkPool.release(remaining);remaining=null;position=0;}return count;
   }
   public void run(){
    UsbRequest request=new UsbRequest();
@@ -55,7 +57,7 @@ public final class H52UsbReadPump {
      UsbRequest complete=connection.requestWait();
      if(complete!=request)throw new IllegalStateException("USB device detached or request replaced");
      int count=buffer.position(); if(count<=0){checkDevice();continue;}
-     byte[] data=new byte[count];buffer.flip();buffer.get(data);while(!packets.offer(data,100,TimeUnit.MILLISECONDS))checkDevice();
+     buffer.flip();UsbReadChunkPool.Chunk data=chunkPool.copyFrom(buffer,count);while(!packets.offer(data,100,TimeUnit.MILLISECONDS))checkDevice();
     }
    }catch(InterruptedException e){Thread.currentThread().interrupt();failure=new IllegalStateException("USB pump interrupted",e);}
    catch(RuntimeException e){failure=e;}

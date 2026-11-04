@@ -21,6 +21,9 @@ class TlsDuplexChannel private constructor(
     private val writeLock = Any()
     private val encryptedInput = ByteQueue()
     private val plaintextInput = ByteQueue()
+    // Handshake runs before publication; subsequent unwrap calls are serialized by readLock.
+    // Only the working buffer is retained. EngineOutcome always owns a separate output array.
+    private var unwrapOutput: ByteBuffer? = null
     private var closed = false
     private var inboundEnded = false
     private var failure: IphoneUsbException? = null
@@ -267,7 +270,11 @@ class TlsDuplexChannel private constructor(
                 throw IphoneUsbException.Protocol("TLS application buffer exceeds the defensive limit")
             }
             val input = encryptedInput.asByteBuffer()
-            val output = ByteBuffer.allocate(capacity)
+            val output = unwrapOutput?.takeIf { it.capacity() >= capacity }
+                ?: ByteBuffer.allocate(capacity).also { unwrapOutput = it }
+            output.clear()
+            // Preserve the session's requested write limit even if an earlier record grew the buffer.
+            output.limit(capacity)
             val result = synchronized(engineLock) { engine.unwrap(input, output) }
             if (result.status == SSLEngineResult.Status.BUFFER_OVERFLOW) {
                 if (result.bytesConsumed() != 0 || result.bytesProduced() != 0) {

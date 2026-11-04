@@ -443,6 +443,24 @@ class CarPlayController(
         }
     }
 
+    /** Admission only. A stale queued probe is dropped rather than sent after a later reconnect. */
+    fun requestPhoneNavigationProbe(id: String, kind: String, latitude: Double?, longitude: Double?,
+                                    coordinateSystem: String?): Boolean {
+        if (closed) return false
+        val session = activeSession ?: return false
+        com.shilapi.xcertplay.airplay.GeelyPhoneNavigationProbe.command(kind, latitude, longitude, coordinateSystem)
+        val queuedAt = System.nanoTime()
+        return inputQueue.command {
+            if (!com.shilapi.xcertplay.airplay.GeelyPhoneNavigationProbe.maySend(
+                    queuedAt, System.nanoTime(), !closed && activeSession === session)) {
+                Log.i("GeelyPhoneProbe", "id=$id dropped=stale_session_or_queue")
+            } else {
+                val sent = session.sendPhoneNavigationProbe(id, kind, latitude, longitude, coordinateSystem)
+                if (!sent) Log.i("GeelyPhoneProbe", "id=$id not_written")
+            }
+        }
+    }
+
     fun sendMediaButton(index: Int): Boolean {
         if (closed) return false
         val session = activeSession ?: return false

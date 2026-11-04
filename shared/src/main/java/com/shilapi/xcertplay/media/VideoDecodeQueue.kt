@@ -8,7 +8,9 @@ import java.util.concurrent.TimeUnit
 
 internal sealed interface VideoJob {
     data class Config(val codec: VideoCodec, val codecData: ByteArray) : VideoJob
-    data class Frame(val nalus: ByteArray, val receivedNs: Long = System.nanoTime()) : VideoJob
+    /** receivedNs keeps the existing age-limit origin; trace is diagnostic metadata only. */
+    data class Frame(val nalus: ByteArray, val receivedNs: Long = System.nanoTime(),
+        val trace: VideoFrameTrace? = null) : VideoJob
     data class SurfaceChanged(val surface: Surface?) : VideoJob
     /** Ordered reference-chain break; the next dependent frame must wait for a new keyframe. */
     data class Resync(val reason: String = "video queue overflow") : VideoJob
@@ -32,12 +34,13 @@ internal class VideoDecodeQueue(
     // C reserves bounded control capacity: two configs, one latest surface, one reference break.
     // The total is therefore maxFrames + 4 jobs and maxBytes of Frame + Config payloads.
     private val boundedControls: Boolean = false,
+    private val onTraceDrop: (VideoFrameTrace, String) -> Unit = { _, _ -> },
 ) {
     private val jobs = LinkedBlockingQueue<VideoJob>()
     private var closed = false
 
     @Synchronized fun offer(job: VideoJob) {
-        if (closed) return
+        if (closed) { traceDrop(job, "queue_closed"); return }
         if (boundedControls) {
             offerBounded(job)
             return
@@ -54,7 +57,7 @@ internal class VideoDecodeQueue(
                 jobs.offer(VideoJob.Resync())
             }
             // A single oversized frame is also a lost reference chain.
-            if (job.nalus.size > maxBytes) return
+            if (job.nalus.size > maxBytes) { traceDrop(job, "oversized"); return }
         }
         jobs.offer(job)
     }
@@ -83,7 +86,7 @@ internal class VideoDecodeQueue(
                 }
                 // Config bytes share the same budget. A frame still too large after clearing
                 // frames is a declared gap, not permission to exceed the queue's memory cap.
-                if (usage().bytes + job.nalus.size > maxBytes) return
+                if (usage().bytes + job.nalus.size > maxBytes) { traceDrop(job, "oversized"); return }
             }
         }
         jobs.offer(job)
@@ -109,8 +112,8 @@ internal class VideoDecodeQueue(
         // Collection.removeIf is a Java default method added in API 24; use the iterator on 4.3.
         val iterator = jobs.iterator()
         while (iterator.hasNext()) {
-            when (iterator.next()) {
-                is VideoJob.Frame, is VideoJob.Resync -> iterator.remove()
+            when (val job = iterator.next()) {
+                is VideoJob.Frame, is VideoJob.Resync -> { traceDrop(job, "queue_discard"); iterator.remove() }
                 else -> Unit
             }
         }
@@ -139,7 +142,10 @@ internal class VideoDecodeQueue(
             }
         }
         val frame = selected ?: return null
-        repeat(selectedSize) { jobs.poll() }
+        repeat(selectedSize) { index ->
+            val removed = jobs.poll()
+            if (index < selectedSize - 1 && removed != null) traceDrop(removed, "idr_catchup")
+        }
         return CatchUp(frame, selectedSize - 1)
     }
 
@@ -148,7 +154,12 @@ internal class VideoDecodeQueue(
     /** Releases retained buffers and makes any late producer callback harmless after shutdown. */
     @Synchronized fun close() {
         closed = true
+        jobs.forEach { traceDrop(it, "queue_close") }
         jobs.clear()
+    }
+
+    private fun traceDrop(job: VideoJob, reason: String) {
+        if (job is VideoJob.Frame) job.trace?.let { runCatching { onTraceDrop(it, reason) } }
     }
 }
 

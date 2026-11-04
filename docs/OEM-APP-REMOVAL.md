@@ -4,6 +4,8 @@
 
 ## 讯飞导航服务
 
+[下载实车验证版独立桥接 APK（1.0）](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/navigation-bridge-v1.0-20261103/Geely-NavigationBridge-1.0-20261103-66f37f2d008a.apk)
+
 卸载原车高德后，HUD 闪烁消失，但原厂讯飞语音客户端 `com.iflytek.cutefly.speechclient` 仍尝试绑定 `com.iflytek.navigationservice.NavigationService`。高德已移除，绑定失败后约每 2 秒重试。安装前的 30 秒现场日志中记录了 14 次 `NavigationService not found`。
 
 解决方案是独立安装 `com.geely.navigationbridge`。在上述固件且原车高德已移除的情况下，它接受讯飞的服务绑定与回调注册，由讯飞自动拉起。导航请求返回不可用，位置返回空以保留讯飞原有的平台定位后备。手机高德和 CarPlay 的路线转发不在该服务的功能范围内。

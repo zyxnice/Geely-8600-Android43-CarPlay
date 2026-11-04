@@ -4,6 +4,8 @@
 
 ## 讯飞导航服务
 
+导航兼容APK只处理缺失导航服务的绑定，不负责关闭后台语音监听。2026-11-04另有[讯飞仅按键维护候选](IFLYTEK-BUTTON-ONLY-20261104.md)，已定向安装，但仅按键验收未通过；两者的源码、安装与效果分别记录。
+
 [下载实车验证版独立桥接 APK（1.0）](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/navigation-bridge-v1.0-20261103/Geely-NavigationBridge-1.0-20261103-66f37f2d008a.apk)
 
 卸载原车高德后，HUD 闪烁消失，但原厂讯飞语音客户端 `com.iflytek.cutefly.speechclient` 仍尝试绑定 `com.iflytek.navigationservice.NavigationService`。高德已移除，绑定失败后约每 2 秒重试。安装前的 30 秒现场日志中记录了 14 次 `NavigationService not found`。

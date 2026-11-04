@@ -6,6 +6,7 @@
 - 固定特权桥参照 compat/GeelyUsbOemBridge.java、GeelyVpnConsentHelper.java；HUD独占控制已于2026-11-04撤销，不新增原车应用启用状态操作。
 - 设置 UI 参照 common/src/main/java/com/shilapi/xcertplay/DiPlayActivity.kt；启动参照 BootReceiver.kt。
 - HUD现行行为见 docs/GEELY-8600-HUD.md；ADR-0010已撤销，仅保留历史。
+- 讯飞仅按键维护候选参照 scripts/iflytek-button-only/README.md、docs/IFLYTEK-BUTTON-ONLY-20261104.md 与 ADR-0011；不参与DiPlay构建。原厂APK/ODEX、反编译树、生成产物和现场日志不入库；当前仅按键验收未通过。源码归档或推送不授权再次操作车机，测试用户唤醒词时禁止同时自动触发语音入口。
 - 验证：:shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb :mobile:assembleDebug；脚本 scripts/verify-geely-usb-apk.ps1 与 verify-geely-navigation-apk.ps1。HUD 显示与 USB 稳定性需实车单独验收。
 - 2026-11-03 HUD 独占测试包已生成／分发，用户随后授权提交、推送并更新 GitHub 说明；不连接或安装到车机。沿用 audio-mix-rollback 9d2283914adc 的音频配置。
 

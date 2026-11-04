@@ -24,6 +24,7 @@ dependencyResolutionManagement {
 
 rootProject.name = "xcertplay"
 include(":common")
+include(":navigation-bridge")
 include(":mobile")
 include(":automotive")
 include(":shared")

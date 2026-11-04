@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- No network, audio, boot receiver, foreground service, or DiPlay dependency. -->
+    <application android:label="讯飞导航兼容服务" android:allowBackup="false"
+        android:supportsRtl="true">
+        <service android:name=".GeelyNavigationService" android:exported="true">
+            <intent-filter>
+                <action android:name="com.iflytek.navigationservice.NavigationService" />
+            </intent-filter>
+        </service>
+    </application>
+</manifest>

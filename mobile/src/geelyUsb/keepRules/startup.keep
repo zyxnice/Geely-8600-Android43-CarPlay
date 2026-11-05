@@ -1,0 +1,29 @@
+-dontobfuscate
+
+# SLF4J 1.7 already falls back to NOP when its optional binding is absent.
+-dontwarn org.slf4j.impl.StaticLoggerBinder
+
+# API18 Surface callbacks access these members by name.
+-keepclassmembers class com.shilapi.xcertplay.CarPlayHostActivity {
+    android.view.Surface currentSurface;
+    android.graphics.SurfaceTexture currentSurfaceTexture;
+    com.shilapi.xcertplay.media.AndroidMediaSink sink;
+    void attachSurface(android.view.Surface);
+    void scheduleDisplaySize(int, int);
+}
+-keepclassmembers class com.shilapi.xcertplay.media.AndroidMediaSink {
+    void clearSurface(int, android.view.Surface);
+}
+
+# JNI constructs this exception without a Java call site.
+-keep class com.shilapi.xcertplay.transport.LinuxI2cNativeException {
+    <init>(int, java.lang.String);
+}
+
+# app_process loads this entry point from the APK by name.
+-keep class com.shilapi.xcertplay.hud.BydClusterSongTool {
+    public static void main(java.lang.String[]);
+}
+-keep class com.shilapi.xcertplay.mfi.LocalMfiProbe {
+    public static void main(java.lang.String[]);
+}

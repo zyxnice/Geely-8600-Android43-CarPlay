@@ -1,7 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
-    <application android:label="@string/geely_usb_app_name" tools:replace="android:label">
+    <application android:name="android.app.Application"
+        android:label="@string/geely_usb_app_name" tools:replace="android:name,android:label">
         <!-- Parked, explicit diagnostic only. No boot or automatic speech binding. -->
         <receiver android:name="com.shilapi.xcertplay.GeelyPhoneNavigationProbeReceiver"
             android:exported="true" android:permission="android.permission.DUMP">

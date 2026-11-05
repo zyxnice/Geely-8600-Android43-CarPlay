@@ -77,6 +77,10 @@ class DiPlayActivity : ComponentActivity() {
     private var page = "home"
     private var pendingCarHotspotSetup = false
     private var setupError: String? = null
+    private var setupComplete = false
+    private var pendingConnection: Boolean? = null
+    private var pendingAutoConnect = false
+    private val setupExecutor = Executors.newSingleThreadExecutor { Thread(it, "diplay-setup") }
     private var status: TextView? = null
     private var geelyHudSwitch: Switch? = null
     private var geelyHudStatus: TextView? = null
@@ -132,6 +136,7 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
+        val startupStartedAt = android.os.SystemClock.elapsedRealtime()
         super.onCreate(savedInstanceState)
         languagePreferenceAtCreate = AppLocale.preference(this)
         com.shilapi.xcertplay.hud.BydNavigationOutputs.onAppOpened(applicationContext)
@@ -144,10 +149,8 @@ class DiPlayActivity : ComponentActivity() {
             isAppearanceLightStatusBars = false
             hide(WindowInsetsCompat.Type.statusBars())
         }
-        setupError = runCatching { DiPlayBootstrap.ensure(this) }.exceptionOrNull()?.let {
-            android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
-            getString(R.string.setup_error_auth)
-        }
+        pendingConnection = savedInstanceState?.takeIf { it.containsKey("pending_connection") }?.getBoolean("pending_connection")
+        pendingAutoConnect = savedInstanceState?.getBoolean("pending_auto_connect") ?: false
         pendingCarHotspotSetup = savedInstanceState?.getBoolean("pending_car_hotspot") ?: false
         page = savedInstanceState?.getString("page") ?: intent.getStringExtra("page") ?: "home"
         render()
@@ -158,6 +161,57 @@ class DiPlayActivity : ComponentActivity() {
                 else { isEnabled = false; onBackPressedDispatcher.onBackPressed(); isEnabled = true }
             }
         })
+        prepareAuthentication()
+        android.util.Log.i("DiPlayStartup", "onCreateMs=${android.os.SystemClock.elapsedRealtime() - startupStartedAt}")
+    }
+
+    private fun prepareAuthentication() {
+        val activity = WeakReference(this)
+        val appContext = applicationContext
+        val mainHandler = handler
+        setupExecutor.execute {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            val error = runCatching { DiPlayBootstrap.ensure(appContext) }.exceptionOrNull()
+            android.util.Log.i("DiPlayStartup", "authenticationMs=${android.os.SystemClock.elapsedRealtime() - startedAt} thread=background success=${error == null}")
+            mainHandler.post {
+                val target = activity.get() ?: return@post
+                if (target.isFinishing || target.isDestroyed) return@post
+                target.onAuthenticationPrepared(error)
+            }
+        }
+    }
+
+    private fun onAuthenticationPrepared(error: Throwable?) {
+        setupComplete = true
+        setupError = error?.let {
+            android.util.Log.e("DiPlaySetup", "CarPlay authentication could not be loaded", it)
+            getString(R.string.setup_error_auth)
+        }
+        if (setupError != null) {
+            pendingConnection = null
+            pendingAutoConnect = false
+            render()
+        } else {
+            refreshStatus()
+            resumePendingConnection()
+        }
+    }
+
+    private fun resumePendingConnection() {
+        if (!activityResumed || !setupComplete || setupError != null) return
+        val wireless = pendingConnection
+        pendingConnection = null
+        if (wireless != null) {
+            pendingAutoConnect = false
+            connect(wireless)
+        } else if (pendingAutoConnect) {
+            pendingAutoConnect = false
+            if (DiPlayPreferences.autoConnect(this) && !CarPlayBackgroundSession.hasSession() &&
+                intent.getStringExtra("page") == null) {
+                connect(AirPlayPersistence.loadWirelessEnabled(this))
+            }
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -165,7 +219,13 @@ class DiPlayActivity : ComponentActivity() {
         page = intent.getStringExtra("page") ?: "home"; render()
         handleWirelessRecovery()
     }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putString("page", page); outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup); super.onSaveInstanceState(outState) }
+    override fun onSaveInstanceState(outState: Bundle) {
+        outState.putString("page", page)
+        outState.putBoolean("pending_car_hotspot", pendingCarHotspotSetup)
+        pendingConnection?.let { outState.putBoolean("pending_connection", it) }
+        outState.putBoolean("pending_auto_connect", pendingAutoConnect)
+        super.onSaveInstanceState(outState)
+    }
     override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); render() }
     private fun openOverlayPermission() {
         val intent = Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, Uri.parse("package:$packageName"))
@@ -202,11 +262,12 @@ class DiPlayActivity : ComponentActivity() {
         if (!initialLaunch && (page == "home" || page == "settings" || page == "connection")) render()
         if (initialLaunch) {
             initialLaunch = false
-            if (setupError == null && !CarPlayBackgroundSession.hasSession() &&
+            if (pendingConnection == null && setupError == null && !CarPlayBackgroundSession.hasSession() &&
                 DiPlayPreferences.autoConnect(this) && intent.getStringExtra("page") == null) {
-                handler.post { connect(AirPlayPersistence.loadWirelessEnabled(this)) }
+                pendingAutoConnect = true
             }
         }
+        resumePendingConnection()
         if (AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL) {
             submitCarHotspotAction(CarHotspotAction.READ_STATE)
         }
@@ -214,6 +275,7 @@ class DiPlayActivity : ComponentActivity() {
     override fun onPause() { activityResumed = false; handler.removeCallbacks(tick); super.onPause() }
 
     override fun onDestroy() {
+        setupExecutor.shutdown()
         cancelGeelyPhoneLookup()
         cancelBluetoothStatusProbe()
         hotspotOperationGeneration++
@@ -241,6 +303,7 @@ class DiPlayActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(dp(130), dp(56)))
         content.addView(header)
         content.addView(space(24))
+        if (page != "home") setupError?.let { content.addView(label(it, 16, WARNING)) }
         when (page) {
             "connection" -> connectionSetup(content)
             "settings" -> settings(content)
@@ -1261,6 +1324,12 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun connect(wireless: Boolean) {
+        pendingAutoConnect = false
+        if (!setupComplete) {
+            pendingConnection = wireless
+            refreshStatus()
+            return
+        }
         if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
         if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
@@ -1697,6 +1766,7 @@ class DiPlayActivity : ComponentActivity() {
             setupError != null -> getString(R.string.setup_needs_attention)
             CarPlayBackgroundSession.active -> getString(R.string.carplay_connected)
             running -> getString(R.string.connecting_to_your_iphone)
+            !setupComplete -> getString(R.string.preparing_mfi_authentication)
             DiPlayPreferences.phoneSelectedForTransport(this, AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this)) -> "${getString(R.string.status_ready_for_prefix)}${DiPlayPreferences.phoneName(this)}"
             else -> getString(R.string.ready_when_you_are)
         }
@@ -1735,6 +1805,7 @@ class DiPlayActivity : ComponentActivity() {
         exportButton?.apply { isEnabled = false; text = getString(R.string.saving_report) }
         val appContext = applicationContext
         val fileName = reportFileName()
+        val setupStatus = if (!setupComplete) "preparing authentication" else if (setupError == null) "ready" else "authentication unavailable"
         Thread({
             val result = runCatching {
                 val report = buildString {
@@ -1744,7 +1815,7 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("Connection: ${if (AirPlayPersistence.loadWirelessEnabled(appContext)) "wireless" else "USB"}")
                     appendLine("Saved Bluetooth backend preference (not active-link proof): ${if (AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(appContext)) "H52-ANW" else "Android"}")
                     appendLine("Authentication: local experimental beta identity; no remote fallback")
-                    appendLine("CarPlay setup: ${if (setupError == null) "ready" else "authentication unavailable"}")
+                    appendLine("CarPlay setup: $setupStatus")
                     appendLine("Saved video preference (may differ from active session): ${if (AirPlayPersistence.loadHevcEnabled(appContext)) "HEVC" else "H.264"}; ${AirPlayPersistence.loadFps(appContext)} fps")
                     appendLine("CarPlay size: ${com.shilapi.xcertplay.airplay.CarPlaySize.fromWidthMillimeters(AirPlayPersistence.loadWidthPhysicalMm(appContext)).label}")
                     appendLine("Saved resolution preference (may differ from active session): ${AirPlayPersistence.loadDisplayScaleTenths(appContext) * 10}%")

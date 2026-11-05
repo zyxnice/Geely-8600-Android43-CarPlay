@@ -49,6 +49,10 @@ android {
         }
         create("geelyUsb") {
             initWith(getByName("debug"))
+            optimization {
+                enable = true
+            }
+            multiDexEnabled = false
             applicationIdSuffix = ".repair1.geely8600"
             versionNameSuffix = if (geelyPerformanceStage == "off") "-H53-USB2" else "-H53-USB3-$geelyPerformanceStage"
             manifestPlaceholders["geelyMediaStage"] = geelyPerformanceStage

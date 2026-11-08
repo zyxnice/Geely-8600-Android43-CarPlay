@@ -88,6 +88,8 @@ class AudioStream(
     private fun runData(socket: DatagramSocket, listener: Listener) {
         val stats = StreamReceiveStats("audio type=$streamType", onDiagnostic, cryptoDetails = { crypto.snapshot().toString() })
         val buffer = ByteArray(DATAGRAM_BYTES)
+        // Only this receive worker uses these inputs; authenticated open finishes before reuse.
+        val packetBuffers = AudioPacketBuffers()
         try {
             while (!closed.get()) {
                 val packet = DatagramPacket(buffer, buffer.size)
@@ -123,17 +125,13 @@ class AudioStream(
                     continue
                 }
 
-                val aad = wire.copyOfRange(4, RTP_HEADER_LEN)
-                val sealedEnd = wire.size - NONCE_LEN
-                val sealed = wire.copyOfRange(RTP_HEADER_LEN, sealedEnd)
-                val shortNonce = wire.copyOfRange(sealedEnd, wire.size)
-                val nonce = ByteArray(12).also { shortNonce.copyInto(it, 4) }
+                packetBuffers.prepare(wire)
                 val sample = readU32Be(wire, 4)
 
                 val payload = try {
                     val decryptStarted = System.nanoTime()
                     try {
-                        crypto.open(key, nonce, sealed, aad)
+                        crypto.open(key, packetBuffers.nonce, packetBuffers.sealed, packetBuffers.aad)
                     } finally {
                         stats.decrypted(System.nanoTime() - decryptStarted)
                     }
@@ -151,7 +149,7 @@ class AudioStream(
                     stats.processed()
                     continue
                 }
-                val rtp = wire.copyOf(RTP_HEADER_LEN) + payload
+                val rtp = packetBuffers.rtp(wire, payload)
                 val decryptedNumber = decryptedPackets.incrementAndGet()
                 if (decryptedNumber <= FIRST_PACKET_LOG_COUNT) {
                     android.util.Log.i(

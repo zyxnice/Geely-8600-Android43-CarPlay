@@ -3,6 +3,7 @@ package com.shilapi.xcertplay.transport
 import android.hardware.usb.UsbDevice
 import android.hardware.usb.UsbDeviceConnection
 import android.hardware.usb.UsbEndpoint
+import android.hardware.usb.UsbInterface
 import android.hardware.usb.UsbRequest
 import java.lang.reflect.InvocationTargetException
 import java.nio.ByteBuffer
@@ -134,7 +135,14 @@ class UsbMuxIssue100RegressionTest {
             ClassParameter.from(Int::class.javaPrimitiveType, 2),
             ClassParameter.from(Int::class.javaPrimitiveType, 512),
             ClassParameter.from(Int::class.javaPrimitiveType, 0))
-        return Iap2UsbSession(connection, endpoint(0x04), endpoint(0x85))
+        val usbInterface = ReflectionHelpers.callConstructor(UsbInterface::class.java,
+            ClassParameter.from(Int::class.javaPrimitiveType, 1),
+            ClassParameter.from(Int::class.javaPrimitiveType, 0),
+            ClassParameter.from(String::class.java, "USBMUX"),
+            ClassParameter.from(Int::class.javaPrimitiveType, 255),
+            ClassParameter.from(Int::class.javaPrimitiveType, 254),
+            ClassParameter.from(Int::class.javaPrimitiveType, 2))
+        return Iap2UsbSession(connection, usbInterface, endpoint(0x04), endpoint(0x85))
     }
 
     private fun takeFrame(host: Iap2UsbMuxHost, timeoutMillis: Long = 1000L): Any? {

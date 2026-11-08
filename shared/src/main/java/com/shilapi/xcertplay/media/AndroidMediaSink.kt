@@ -673,6 +673,8 @@ private class VideoDecoder(
     private val pipeline = VideoPipelineStats(report = { report(it) })
     // Output selection remains scoped to the B hardware candidate.
     private val latestDecodedOutput = performance.stage == "B"
+    // Only the carplay-video worker drains the codec; reuse its output metadata across polls.
+    private val outputInfo = MediaCodec.BufferInfo()
     private val thread = Thread(::run, "carplay-video").apply { isDaemon = true; start() }
 
     fun configure(codec: VideoCodec, codecData: ByteArray) {
@@ -1004,7 +1006,7 @@ private class VideoDecoder(
     }
 
     private fun drainOutput(codec: MediaCodec) {
-        val info = MediaCodec.BufferInfo()
+        val info = outputInfo
         val batch = if (latestDecodedOutput) VideoOutputBatch { index, pts, flags, bytes, render ->
             releaseVideoOutput(codec, index, pts, flags, render, bytes)
         } else null

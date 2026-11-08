@@ -3996,8 +3996,6 @@ class CarPlayHostActivity : ComponentActivity() {
         val oldSink = sink
         CarPlayMediaKeys.detach(oldController)
         CarPlayBackgroundSession.clear(oldController, keepOwner = true)
-        controller = null
-        sink = null
         sessionDisplay = null
         val diagnosticLog = sessionLog
         teardownExecutor.execute {
@@ -4013,6 +4011,14 @@ class CarPlayHostActivity : ComponentActivity() {
             oldSink?.close()
             runOnUiThread {
                 if (!shuttingDown.get() && generation == restartGeneration) {
+                    if (!completed) {
+                        // Keep the restart gate closed: the previous USB owner may still be alive.
+                        appendLog("Previous connection teardown is incomplete; reconnect paused")
+                        setConnectionStage("旧连接尚未释放，重连已暂停")
+                        return@runOnUiThread
+                    }
+                    controller = null
+                    sink = null
                     handshakeResetInProgress = false
                     startCarPlay(size)
                 }
@@ -4077,14 +4083,22 @@ class CarPlayHostActivity : ComponentActivity() {
         shutdown(terminateProcess = true, reason = "settings exit application")
     }
 
+    private val shutdownWaiters = mutableListOf<() -> Unit>()
+    private var shutdownClean = false
+
     private fun shutdown(terminateProcess: Boolean, reason: String, completion: () -> Unit = {}) {
-        if (!shuttingDown.compareAndSet(false, true)) { completion(); return }
+        synchronized(shutdownWaiters) {
+            if (shutdownClean) { mainHandler.post { completion() }; return }
+            shutdownWaiters.add(completion)
+            if (!shuttingDown.compareAndSet(false, true)) return
+        }
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
         val oldController = controller
         val oldSink = sink
         CarPlayMediaKeys.detach(oldController)
-        CarPlayBackgroundSession.clear(oldController)
+        // Drop the adoptable snapshot while retaining the process-local owner/stop gate.
+        CarPlayBackgroundSession.clear(oldController, keepOwner = true)
         controller = null
         sink = null
         sessionDisplay = null
@@ -4098,9 +4112,21 @@ class CarPlayHostActivity : ComponentActivity() {
                 applicationContext.stopService(Intent(applicationContext, CarPlayVpnService::class.java))
             }
             Log.i(TAG, "shutdown complete clean=$clean")
+            if (!clean && !terminateProcess) {
+                // A completion such as recreate() would otherwise open another USB owner.
+                mainHandler.post { setConnectionStage("旧连接尚未释放，重连已暂停") }
+                return@execute
+            }
+            if (clean) CarPlayBackgroundSession.releaseOwnerAfterClose(this)
             applicationContext.stopService(Intent(applicationContext, DiPlaySessionService::class.java))
             teardownExecutor.shutdown()
-            mainHandler.post { completion() }
+            if (clean) {
+                val completions = synchronized(shutdownWaiters) {
+                    shutdownClean = true
+                    shutdownWaiters.toList().also { shutdownWaiters.clear() }
+                }
+                mainHandler.post { completions.forEach { it() } }
+            }
             if (terminateProcess) Process.killProcess(Process.myPid())
         }
     }
@@ -4474,9 +4500,16 @@ class CarPlayHostActivity : ComponentActivity() {
         val wide = isWideConnectionSurface()
         val mainVideoActive = SCREEN_TYPE_MAIN in activeScreenStreamTypes
         val logsWereVisible = statusScrollView?.visibility == View.VISIBLE
+        val connectionWasVisible = connectionPanel?.visibility == View.VISIBLE ||
+            wideConnectionPanel?.visibility == View.VISIBLE
         connectionPanel?.visibility =
             if (!wide && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
         wideConnectionPanel?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
+        if (connectionWasVisible && connectionPanel?.visibility != View.VISIBLE &&
+            wideConnectionPanel?.visibility != View.VISIBLE) {
+            Log.i("DiPlayUsbTiming", "event=main_connection_panel_hidden " +
+                "elapsedNs=${android.os.SystemClock.elapsedRealtimeNanos()}")
+        }
         statusScrollView?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
         // Hidden panels retain their model/file history without rebuilding text layouts.
         // Refresh once on reveal so a disconnect immediately shows current diagnostics.
@@ -4863,5 +4896,11 @@ internal object CarPlayBackgroundSession {
         width = 0
         height = 0
         display = null
+    }
+
+    /** Only a successfully drained owner may unblock a new Activity's connection attempt. */
+    @Synchronized
+    fun releaseOwnerAfterClose(expectedOwner: Any) {
+        if (owner === expectedOwner) clear()
     }
 }

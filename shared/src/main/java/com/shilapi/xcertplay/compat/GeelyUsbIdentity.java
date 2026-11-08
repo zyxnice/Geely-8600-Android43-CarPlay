@@ -44,7 +44,12 @@ public final class GeelyUsbIdentity {
         try {
             byte[] digest = MessageDigest.getInstance("SHA-256").digest(bytes);
             StringBuilder hex = new StringBuilder(64);
-            for (byte value : digest) hex.append(String.format(Locale.US, "%02x", value & 255));
+            // The kernel-link monitor also calls this; avoid a Formatter allocation for every byte.
+            for (byte value : digest) {
+                int unsigned = value & 255;
+                hex.append("0123456789abcdef".charAt(unsigned >>> 4));
+                hex.append("0123456789abcdef".charAt(unsigned & 15));
+            }
             return hex.toString();
         } catch (NoSuchAlgorithmException unavailable) {
             throw new IllegalStateException("SHA-256 unavailable", unavailable);

@@ -6,6 +6,43 @@
 #include <linux/usbdevice_fs.h>
 #include "geely_usb_configuration.h"
 
+// Diagnostic startup-only OUT transfer. Copy one short packet before waiting, never pin a Java
+// array across ioctl. Caller owns this duplicated fd until ioctl returns. No internal replay.
+JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_compat_LegacyUsbNative_writeStartupPacket(
+        JNIEnv *env, jobject self, jint fd, jint endpoint, jbyteArray bytes,
+        jint offset, jint length, jint timeout_ms) {
+    (void) self;
+    if (fd < 0) return -EBADF;
+    if (bytes == NULL || endpoint < 1 || endpoint > 15 || offset < 0 ||
+            length < 1 || length > 511 || timeout_ms < 1 || timeout_ms > 2000) return -EINVAL;
+    jsize array_length = (*env)->GetArrayLength(env, bytes);
+    if (offset > array_length || length > array_length - offset) return -EINVAL;
+    unsigned char packet[511];
+    (*env)->GetByteArrayRegion(env, bytes, offset, length, (jbyte *) packet);
+    if ((*env)->ExceptionCheck(env)) return -EFAULT;
+    struct usbdevfs_bulktransfer request;
+    memset(&request, 0, sizeof(request));
+    request.ep = (unsigned int) endpoint;
+    request.len = (unsigned int) length;
+    request.timeout = (unsigned int) timeout_ms;
+    request.data = packet;
+    int result = ioctl(fd, USBDEVFS_BULK, &request);
+    if (result < 0) result = -errno;
+    return result;
+}
+
+JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_compat_LegacyUsbNative_duplicate(JNIEnv *env, jobject self, jint fd) {
+    (void) env; (void) self;
+    if (fd < 0) return -EBADF;
+    int owned_fd = dup(fd);
+    return owned_fd < 0 ? -errno : owned_fd;
+}
+
+JNIEXPORT void JNICALL Java_com_shilapi_xcertplay_compat_LegacyUsbNative_closeOwned(JNIEnv *env, jobject self, jint fd) {
+    (void) env; (void) self;
+    if (fd >= 0) close(fd);
+}
+
 // Separate opt-in entry: the existing configure() contract and other platforms are unchanged.
 JNIEXPORT jint JNICALL Java_com_shilapi_xcertplay_compat_LegacyUsbNative_configureGeely(JNIEnv *env, jobject self, jint fd, jint id) {
     (void) env; (void) self;

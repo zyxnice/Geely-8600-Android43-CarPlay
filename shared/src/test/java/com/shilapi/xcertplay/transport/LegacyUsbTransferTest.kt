@@ -141,6 +141,34 @@ class LegacyUsbTransferTest {
         }
     }
 
+    @Test fun negativeChunkResultIsNotRetriedOrCountedAsConfirmedProgress() {
+        withClock {
+            var calls = 0
+            val transfer = LegacyUsbTransfer.ChunkTransfer { _, _, _ -> calls++; -1 }
+            assertEquals(0, LegacyUsbTransfer.writeAll(transfer, 0, 1233, deadline(5_000)))
+            assertEquals(1, calls)
+        }
+    }
+
+    @Test fun diagnosticFailurePropagatesWithoutReplayingPartialFrame() {
+        withClock {
+            val error = IllegalStateException("rawResult=-1 progressUnknown=true")
+            val offsets = mutableListOf<Int>()
+            val transfer = LegacyUsbTransfer.ChunkTransfer { offset, length, _ ->
+                offsets += offset
+                if (offset > 0) throw error
+                length
+            }
+            try {
+                LegacyUsbTransfer.writeAll(transfer, 0, 20000, deadline(5_000))
+                fail("Expected original transfer failure")
+            } catch (actual: IllegalStateException) {
+                assertTrue(actual === error)
+            }
+            assertEquals(listOf(0, LegacyUsbTransfer.MAX_CHUNK_BYTES), offsets)
+        }
+    }
+
     @Test fun writeStopsWhenTheDeadlineHasPassed() {
         withClock {
             var calls = 0

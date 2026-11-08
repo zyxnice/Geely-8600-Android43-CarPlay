@@ -52,8 +52,11 @@ public final class H52UsbConfigurationFix {
         int active=u(current,0);
         if(active==target) return true;
         boolean runtimeRecovery=GeelyUsbDeviceAccess.runtimeRecoveryEnabled(connection);
+        boolean configurationRecovery=GeelyUsbDeviceAccess.configurationRecoveryEnabled(connection);
+        boolean geelyTransition=(runtimeRecovery || configurationRecovery)
+                && device.getVendorId()==0x05ac && device.getProductId()==0x12a8 && active==2 && target==6;
         int result;
-        if(runtimeRecovery && device.getVendorId()==0x05ac && device.getProductId()==0x12a8 && active==2 && target==6) {
+        if(geelyTransition) {
             result=LegacyUsbNative.INSTANCE.configureGeely(connection.getFileDescriptor(),target);
             Log.i("xcertplay-usb","8600 configuration recovery active="+active+" target="+target+" result="+result);
         } else if(GeelyUsbDeviceAccess.setConfigurationIfRecovered(device,connection,target)) {
@@ -61,7 +64,7 @@ public final class H52UsbConfigurationFix {
         } else {
             result=LegacyUsbNative.INSTANCE.configure(connection.getFileDescriptor(),target);
         }
-        if(runtimeRecovery && result!=0) {
+        if((runtimeRecovery || geelyTransition) && result!=0) {
             Log.e("xcertplay-usb","8600 configuration recovery failed errno="+result+" active="+active+" target="+target);
             throw new IllegalStateException("8600 USB配置切换失败 errno="+result
                     +(result==-16 ? "；请关闭其他投屏应用后重试" : "；请保存连接日志"));

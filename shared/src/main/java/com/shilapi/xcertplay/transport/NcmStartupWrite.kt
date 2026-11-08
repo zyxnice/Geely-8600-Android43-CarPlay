@@ -13,6 +13,8 @@ internal class NcmStartupWrite(
     private val nowMillis: () -> Long,
     private val pause: (Long) -> Unit = Thread::sleep,
     private val startupTimeoutMillis: Long = 15_000L,
+    // Only replayable startup blocks use this cap. Null keeps the caller's timeout.
+    private val startupAttemptLimitMillis: Int? = null,
 ) {
     init { require(maxPacketBytes > 0) }
     @Volatile
@@ -27,6 +29,12 @@ internal class NcmStartupWrite(
         transfer: (timeoutMillis: Int) -> Int,
     ): Int {
         if (ready) return transfer(timeoutMillis)
+        val canReplay = blockBytes < maxPacketBytes
+        val attemptTimeout = if (canReplay && startupAttemptLimitMillis != null) {
+            minOf(timeoutMillis, startupAttemptLimitMillis)
+        } else {
+            timeoutMillis
+        }
         val started = nowMillis()
         val deadline = started + startupTimeoutMillis
         var attempts = 0
@@ -35,7 +43,7 @@ internal class NcmStartupWrite(
             val remaining = deadline - nowMillis()
             if (remaining <= 0) throw IOException("NCM bulk OUT did not become ready within ${startupTimeoutMillis}ms")
             attempts++
-            val transferred = transfer(minOf(timeoutMillis.toLong(), remaining).toInt())
+            val transferred = transfer(minOf(attemptTimeout.toLong(), remaining).toInt())
             if (transferred > 0) {
                 if (transferred == blockBytes) {
                     ready = true
@@ -45,7 +53,7 @@ internal class NcmStartupWrite(
             }
             // Below wMaxPacketSize this NTB is one USB short packet; multi-packet errors do not
             // expose enough progress through bulkTransfer() to make a whole-block retry safe.
-            if (blockBytes >= maxPacketBytes) return transferred
+            if (!canReplay) return transferred
             if (!waitingReported) {
                 waitingReported = true
                 onWaiting()

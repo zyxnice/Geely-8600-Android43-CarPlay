@@ -248,6 +248,7 @@ class IphoneUsbHost(
                     IphoneUsbException.PermissionDenied("USB permission was denied", error),
                 )
             } catch (error: RuntimeException) {
+                Log.e(IphoneCarPlayConfiguration.TAG, "wired USBMUX open failed path=${device.deviceName}", error)
                 Iap2SessionResult.Failed(
                     IphoneUsbException.DeviceUnavailable("iPhone USBMUX operation failed", error),
                 )
@@ -335,7 +336,7 @@ class IphoneUsbHost(
                 throw IphoneUsbException.DeviceUnavailable("Android could not claim USBMUX interface 1")
             }
             claimedInterface = usbMux
-            return Iap2UsbSession(connection, endpoints.first, endpoints.second)
+            return Iap2UsbSession(connection, usbMux, endpoints.first, endpoints.second)
         } catch (error: Throwable) {
             if (claimedInterface != null) connection.releaseInterface(claimedInterface)
             connection.close()
@@ -398,6 +399,7 @@ class IphoneUsbHost(
  */
 class Iap2UsbSession internal constructor(
     private val connection: UsbDeviceConnection,
+    private val claimedInterface: UsbInterface,
     private val outEndpoint: UsbEndpoint,
     private val inEndpoint: UsbEndpoint,
 ) : Closeable {
@@ -405,6 +407,7 @@ class Iap2UsbSession internal constructor(
     private val readLock = Any()
     private val writeLock = Any()
     private var closed = false
+    private var connectionClosed = false
     private var failure: IphoneUsbException? = null
     private var pendingRead: UsbRequest? = null
 
@@ -414,7 +417,21 @@ class Iap2UsbSession internal constructor(
         if (data.isEmpty()) return@synchronized
         val transferred = if (LegacyUsbTransfer.chunkedWritesRequired) {
             LegacyUsbTransfer.writeAll(
-                LegacyUsbTransfer.endpointWriter(connection, outEndpoint, data, 0),
+                LegacyUsbTransfer.ChunkTransfer { offset, length, budgetMillis ->
+                    val started = SystemClock.elapsedRealtime()
+                    val result = connection.bulkTransfer(outEndpoint, data, offset, length, budgetMillis)
+                    if (result <= 0) {
+                        // A negative bulk result can hide partial device consumption. Preserve it
+                        // before writeAll reduces the result to confirmed bytes; never replay here.
+                        throw failSession(
+                            "USBMUX write failed endpoint=${describeUsbEndpoint(outEndpoint)} " +
+                                "confirmedBytes=$offset requestedBytes=${data.size} chunkBytes=$length " +
+                                "rawResult=$result timeoutMs=$budgetMillis " +
+                                "elapsedMs=${SystemClock.elapsedRealtime() - started} progressUnknown=${result < 0}",
+                        )
+                    }
+                    result
+                },
                 sourceOffset = 0,
                 length = data.size,
                 deadlineNanos = SystemClock.elapsedRealtime() * 1_000_000L + timeoutMillis * 1_000_000L,
@@ -423,7 +440,9 @@ class Iap2UsbSession internal constructor(
             connection.bulkTransfer(outEndpoint, data, data.size, timeoutMillis)
         }
         if (transferred != data.size) {
-            throw IphoneUsbException.DeviceUnavailable(
+            // A partial frame cannot be followed by another USBMUX frame on this session.
+            // Keep the existing failure visible to readers and subsequent writers until teardown.
+            throw failSession(
                 "USBMUX write transferred $transferred of ${data.size} bytes",
             )
         }
@@ -484,14 +503,24 @@ class Iap2UsbSession internal constructor(
         }
     }
 
+    @Synchronized
     override fun close() {
         val requestToCancel = synchronized(stateLock) {
-            if (closed) return
+            if (connectionClosed) return
             closed = true
             pendingRead
         }
         requestToCancel?.cancel()
-        connection.close()
+        synchronized(writeLock) {
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) {
+                // The API18 pump owns requestWait(). Releasing our interface wakes that sole
+                // reaper; closing the connection first can leave its native file reference alive.
+                H52UsbReadPump.close(connection, claimedInterface)
+            } else {
+                connection.close()
+            }
+            connectionClosed = true
+        }
     }
 
     private fun checkOpen() {

@@ -7,6 +7,23 @@ import org.junit.Assert.fail
 import org.junit.Test
 
 class NcmStartupWriteTest {
+    @Test fun aTerminalFirstSubmissionFailureCannotBeReplayedByStartupRecovery() {
+        var calls = 0
+        val failure = IOException("single async submission failed")
+        val writer = NcmStartupWrite(512, { 0L }, { fail("Terminal failure must not back off or retry") })
+        try {
+            writer.write(90, 15_000, { fail("Terminal failure must not retry") }, { _, _ -> fail("Not ready") }) {
+                calls++
+                throw failure
+            }
+            fail("Expected terminal submission failure")
+        } catch (actual: IOException) {
+            assertTrue(actual === failure)
+            assertEquals(1, calls)
+            assertTrue(!writer.ready)
+        }
+    }
+
     @Test fun retainsStartupBlockAcrossEndpointNotReadyAndDoesNotExtendNormalWrites() {
         var now = 0L
         var waits = 0

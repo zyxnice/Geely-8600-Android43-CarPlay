@@ -6,7 +6,8 @@ param(
     [Parameter(Mandatory)][string] $SdkDirectory,
     [string] $BuildToolsVersion = '37.0.0',
     [ValidateSet('USB1', 'USB2', 'USB3-A', 'USB3-B', 'USB3-C')][string] $ExpectedUsbVersion = 'USB1',
-    [string] $BaselineApkPath
+    [string] $BaselineApkPath,
+    [ValidateSet('Enabled', 'Disabled')][string] $ExpectedRuntimeRecovery = 'Enabled'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -64,8 +65,11 @@ if ($BaselineApkPath) {
 $manifestLines = & (Join-Path $toolsDirectory 'aapt2.exe') dump xmltree $resolvedApk --file AndroidManifest.xml
 if ($LASTEXITCODE -ne 0) { throw 'Could not read packaged manifest' }
 $manifest = $manifestLines -join "`n"
-if ($ExpectedUsbVersion -ne 'USB1' -and $manifest -notmatch '(?s)GEELY_USB_RUNTIME_RECOVERY[^\n]*\n[^\n]*android:value[^\n]*(?:=true|0xffffffff)') {
-    throw 'USB2 runtime recovery metadata is missing'
+if ($ExpectedUsbVersion -ne 'USB1') {
+    $runtimeValue = if ($ExpectedRuntimeRecovery -eq 'Enabled') { '(?:=true|0xffffffff)' } else { '(?:=false|0x0\b)' }
+    if ($manifest -notmatch "(?s)GEELY_USB_RUNTIME_RECOVERY[^\n]*\n[^\n]*android:value[^\n]*$runtimeValue") {
+        throw "USB runtime recovery metadata does not match $ExpectedRuntimeRecovery"
+    }
 }
 if ($manifest -notmatch '(?s)GEELY_USB_BYPASS[^\n]*\n[^\n]*android:value[^\n]*(?:=true|0xffffffff)') {
     throw 'The isolated test metadata is not explicitly true'

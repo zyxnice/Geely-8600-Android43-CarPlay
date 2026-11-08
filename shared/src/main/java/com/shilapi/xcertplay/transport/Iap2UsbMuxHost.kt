@@ -60,11 +60,13 @@ class Iap2UsbMuxHost private constructor(
 
     override fun close() {
         val activeConnections = synchronized(stateLock) {
-            if (closed) return
-            closed = true
-            connections.values.toList().also { connections.clear() }
+            if (closed) emptyList() else {
+                closed = true
+                connections.values.toList().also { connections.clear() }
+            }
         }
         activeConnections.forEach(Iap2UsbMuxTcpConnection::closeFromHost)
+        // fail() may already have marked the host closed while its pipe is still draining.
         pipe.close()
         if (::readerThread.isInitialized && Thread.currentThread() !== readerThread) {
             try {

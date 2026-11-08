@@ -33,6 +33,8 @@ public final class GeelyUsbDeviceAccess {
     private static final File SYSFS = new File("/sys/bus/usb/devices");
     private static final Map<UsbDeviceConnection, ConnectionRecord> CONNECTIONS =
             Collections.synchronizedMap(new WeakHashMap<UsbDeviceConnection, ConnectionRecord>());
+    private static final Map<UsbDeviceConnection, Boolean> CONFIGURATION_CONNECTIONS =
+            Collections.synchronizedMap(new WeakHashMap<UsbDeviceConnection, Boolean>());
     private static final Map<UsbDeviceConnection, Boolean> RUNTIME_CONNECTIONS =
             Collections.synchronizedMap(new WeakHashMap<UsbDeviceConnection, Boolean>());
     private final Context context;
@@ -140,7 +142,7 @@ public final class GeelyUsbDeviceAccess {
         synchronized (this) { candidate = recovered.get(device); }
         if (candidate == null) {
             UsbDeviceConnection normal = manager == null ? null : manager.openDevice(device);
-            registerRuntimeConnection(normal);
+            registerConfigurationConnection(normal);
             return normal;
         }
         if (!isEnabled(context)) throw new IllegalStateException("8600 USB bypass guard no longer matches");
@@ -159,7 +161,7 @@ public final class GeelyUsbDeviceAccess {
             if (!Boolean.TRUE.equals(open.invoke(connection, candidate.identity.devicePath(), opened.descriptor)))
                 throw new IOException("UsbDeviceConnection rejected transferred USB descriptor");
             CONNECTIONS.put(connection, new ConnectionRecord(device, candidate.identity, parsed.rawDescriptors(), broker));
-            registerRuntimeConnection(connection);
+            registerConfigurationConnection(connection);
             Log.i(TAG, "8600 USB connection opened through OEM FD bridge " + candidate.identity.devicePath());
             return connection; // Firmware native_open duplicates the FD; OpenedDevice closes the received FD.
         } catch (Exception failure) {
@@ -173,11 +175,25 @@ public final class GeelyUsbDeviceAccess {
         }
     }
 
-    private void registerRuntimeConnection(UsbDeviceConnection connection) {
-        if (connection != null && GeelyUsbRuntimeRecovery.isEnabled(context)) RUNTIME_CONNECTIONS.put(connection, true);
+    private void registerConfigurationConnection(UsbDeviceConnection connection) {
+        if (connection == null) return;
+        // Opening CarPlay on an authorized phone still needs the H53 configuration-2 audio
+        // ownership workaround when automatic system-mode preparation is disabled.
+        if (GeelyUsbRuntimePolicy.matches(Build.VERSION.SDK_INT, Build.BOARD,
+                Build.DISPLAY, isEnabled(context))) CONFIGURATION_CONNECTIONS.put(connection, true);
+        // Keep the existing failure policy for builds that still opt into automatic preparation.
+        if (GeelyUsbRuntimeRecovery.isEnabled(context)) RUNTIME_CONNECTIONS.put(connection, true);
     }
 
-    /** Both framework and recovered connections carry the same exact-platform opt-in. */
+    /**
+     * Both framework and recovered connections carry the exact-platform configuration opt-in.
+     * This permits the existing phone-only configuration transition, not system USB mode changes.
+     */
+    public static boolean configurationRecoveryEnabled(UsbDeviceConnection connection) {
+        return Boolean.TRUE.equals(CONFIGURATION_CONNECTIONS.get(connection));
+    }
+
+    /** Existing automatic-preparation opt-in, retained separately for its legacy failure policy. */
     public static boolean runtimeRecoveryEnabled(UsbDeviceConnection connection) {
         return Boolean.TRUE.equals(RUNTIME_CONNECTIONS.get(connection));
     }

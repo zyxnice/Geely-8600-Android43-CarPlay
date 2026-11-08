@@ -15,6 +15,7 @@ import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.airplay.PairingStore
 import com.shilapi.xcertplay.mfi.MfiAuthenticator
 import com.shilapi.xcertplay.transport.NcmUsbBridge
+import com.shilapi.xcertplay.transport.GeelyKernelNcmLink
 import java.io.IOException
 import java.net.Inet6Address
 import java.net.InetAddress
@@ -23,10 +24,10 @@ import java.net.Socket
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Hosts the AirPlay TCP listener for both NCM/VPN and local-only Wi-Fi transports.
+ * Hosts the AirPlay TCP listener for NCM/VPN, kernel USB and local-only Wi-Fi transports.
  *
- * The wired path also owns the Android VPN tunnel and NCM IPv6 bridge. VPN consent is requested
- * with [prepare] before binding.
+ * The USBFS path also owns the Android VPN tunnel and NCM IPv6 bridge; its VPN consent is requested
+ * with [prepare] before binding. Kernel USB uses an existing network interface without configuring it.
  */
 class CarPlayVpnService : VpnService() {
     inner class LocalBinder : Binder() {
@@ -57,6 +58,8 @@ class CarPlayVpnService : VpnService() {
     private var serverSocket: ServerSocket? = null
     private var bridge: Ipv6NcmBridge? = null
     private var tun: ParcelFileDescriptor? = null
+    private var kernelNcm: GeelyKernelNcmLink? = null
+    private var kernelMonitor: Thread? = null
     private var attachGeneration = 0
     private var firstTcpAccepted = false
 
@@ -129,17 +132,52 @@ class CarPlayVpnService : VpnService() {
         listener: AirPlaySessionListener,
         media: AirPlayMediaHandler,
     ): AttachResult {
+        return attachLocalNetwork(bindAddress, config, identity, pairings, mfi, listener, media, null)
+    }
+
+    /**
+     * Bind the AirPlay server to an already prepared, scoped kernel USB address. No TUN,
+     * interface/IPv6/route/DNS configuration or NCM USB claim is performed. Ownership of [link]
+     * transfers to this attachment, including failure cleanup. The TCP listener and accepted peer
+     * addresses retain this scope; UDP receivers keep the existing wildcard bindings.
+     */
+    @Synchronized
+    fun attachKernelNcm(
+        link: GeelyKernelNcmLink,
+        bindAddress: Inet6Address,
+        config: AirPlayConfig,
+        identity: AirPlayIdentity,
+        pairings: PairingStore,
+        mfi: MfiAuthenticator?,
+        listener: AirPlaySessionListener,
+        media: AirPlayMediaHandler,
+    ): AttachResult = attachLocalNetwork(bindAddress, config, identity, pairings, mfi, listener, media, link)
+
+    /** Caller holds this service's monitor; both local transports share the server/session owner. */
+    private fun attachLocalNetwork(
+        bindAddress: InetAddress,
+        config: AirPlayConfig,
+        identity: AirPlayIdentity,
+        pairings: PairingStore,
+        mfi: MfiAuthenticator?,
+        listener: AirPlaySessionListener,
+        media: AirPlayMediaHandler,
+        kernelLink: GeelyKernelNcmLink?,
+    ): AttachResult {
         if (active.get()) {
-            Log.i(TAG, "replacing stale local-only Wi-Fi attachment")
+            Log.i(TAG, "replacing stale local-network attachment")
             releaseLocked()
         }
         active.set(true)
         val generation = ++attachGeneration
         return try {
+            kernelNcm = kernelLink
+            if (kernelLink != null) kernelLink.beginAttachment(bindAddress as Inet6Address)
             startAirPlayServer(
                 generation,
                 AirPlayAttachment(bindAddress, config, identity, pairings, mfi, listener, media),
             )
+            if (kernelLink != null) startKernelMonitor(generation, kernelLink, listener)
             AttachResult.Started
         } catch (error: Exception) {
             releaseLocked()
@@ -157,6 +195,9 @@ class CarPlayVpnService : VpnService() {
 
     /** Port the AirPlay listener actually bound, which may differ from the configured port. */
     fun boundPort(): Int? = attachment?.config?.port
+
+    /** Actual address of the current listener, including IPv6 scope for native USB sockets. */
+    fun boundAddress(): InetAddress? = attachment?.address
 
     /** Identifies this attachment, so a delayed control worker cannot affect a replacement. */
     @Synchronized
@@ -309,6 +350,26 @@ class CarPlayVpnService : VpnService() {
         }
     }
 
+    private fun startKernelMonitor(generation: Int, link: GeelyKernelNcmLink, listener: AirPlaySessionListener) {
+        kernelMonitor = Thread({
+            try {
+                while (kernelAttachmentCurrent(generation, link)) {
+                    if (!link.isAttachedCurrent()) {
+                        onTransportError(generation, listener, IOException("Kernel USB network binding became unavailable"))
+                        return@Thread
+                    }
+                    Thread.sleep(500)
+                }
+            } catch (_: InterruptedException) {
+                Thread.currentThread().interrupt()
+            }
+        }, "kernel-ncm-monitor").apply { isDaemon = true; start() }
+    }
+
+    @Synchronized
+    private fun kernelAttachmentCurrent(generation: Int, link: GeelyKernelNcmLink): Boolean =
+        active.get() && attachGeneration == generation && kernelNcm === link
+
     /** Caller must hold this service's monitor. Closes only resources active for this attachment. */
     private fun releaseLocked() {
         attachGeneration += 1
@@ -320,6 +381,11 @@ class CarPlayVpnService : VpnService() {
         closeSessionsLocked()
         bridge?.close()
         bridge = null
+        // Never join this worker while holding the service monitor it reads for generation checks.
+        kernelMonitor?.interrupt()
+        kernelMonitor = null
+        kernelNcm?.close()
+        kernelNcm = null
         tun?.close()
         tun = null
     }

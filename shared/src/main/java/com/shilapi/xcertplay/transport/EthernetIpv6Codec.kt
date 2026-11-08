@@ -36,30 +36,47 @@ object EthernetIpv6Codec {
 
     /** Returns an allocation-light view for callers that can consume the payload in place. */
     fun parseIpv6View(frame: ByteArray): Ipv6FrameView? {
-        if (frame.size <= HEADER_BYTES || readU16(frame, 12) != ETHERTYPE_IPV6) return null
+        return parseIpv6View(frame, 0, frame.size)
+    }
+
+    /** Payload offset is absolute in frame; the caller must keep the borrowed range stable. */
+    internal fun parseIpv6View(frame: ByteArray, offset: Int, length: Int): Ipv6FrameView? {
+        require(offset >= 0 && length >= 0 && offset <= frame.size - length)
+        if (length <= HEADER_BYTES || readU16(frame, offset + 12) != ETHERTYPE_IPV6) return null
         return Ipv6FrameView(
-            sourceMac = frame.copyOfRange(6, 12),
-            payloadOffset = HEADER_BYTES,
-            payloadLength = frame.size - HEADER_BYTES,
+            sourceMac = frame.copyOfRange(offset + 6, offset + 12),
+            payloadOffset = offset + HEADER_BYTES,
+            payloadLength = length - HEADER_BYTES,
         )
     }
 
     fun build(sourceMac: ByteArray, destinationMac: ByteArray, ipv6: ByteArray): ByteArray {
+        val frame = ByteArray(HEADER_BYTES + ipv6.size)
+        writeFrame(frame, 0, sourceMac, destinationMac, ipv6, ipv6.size)
+        return frame
+    }
+
+    /** Writes a frame at targetOffset; length excludes unused capacity in the borrowed IPv6 input. */
+    internal fun writeFrame(target: ByteArray, targetOffset: Int, sourceMac: ByteArray,
+        destinationMac: ByteArray, ipv6: ByteArray, length: Int) {
         require(sourceMac.size == MAC_BYTES) { "sourceMac must be $MAC_BYTES bytes" }
         require(destinationMac.size == MAC_BYTES) { "destinationMac must be $MAC_BYTES bytes" }
-        require(ipv6.isNotEmpty()) { "ipv6 payload must not be empty" }
-
-        val frame = ByteArray(HEADER_BYTES + ipv6.size)
-        destinationMac.copyInto(frame, 0)
-        sourceMac.copyInto(frame, 6)
-        putU16(frame, 12, ETHERTYPE_IPV6)
-        ipv6.copyInto(frame, HEADER_BYTES)
-        return frame
+        require(length > 0 && length <= ipv6.size) { "invalid ipv6 payload length" }
+        require(targetOffset >= 0 && targetOffset <= target.size - HEADER_BYTES - length)
+        destinationMac.copyInto(target, targetOffset)
+        sourceMac.copyInto(target, targetOffset + 6)
+        putU16(target, targetOffset + 12, ETHERTYPE_IPV6)
+        ipv6.copyInto(target, targetOffset + HEADER_BYTES, 0, length)
     }
 
     /** Maps an IPv6 multicast destination to its Ethernet 33:33:xx:xx:xx:xx address. */
     fun multicastDestinationMac(ipv6: ByteArray): ByteArray? {
-        if (ipv6.size < IPV6_HEADER_BYTES || (ipv6[0].toInt() ushr 4 and 0x0f) != 6) return null
+        return multicastDestinationMac(ipv6, ipv6.size)
+    }
+
+    internal fun multicastDestinationMac(ipv6: ByteArray, length: Int): ByteArray? {
+        require(length >= 0 && length <= ipv6.size)
+        if (length < IPV6_HEADER_BYTES || (ipv6[0].toInt() ushr 4 and 0x0f) != 6) return null
         if ((ipv6[IPV6_DESTINATION_OFFSET].toInt() and 0xff) != 0xff) return null
         return byteArrayOf(
             0x33,
@@ -78,10 +95,7 @@ object EthernetIpv6Codec {
      */
     fun addNeighborAdvertisementTargetMac(ipv6: ByteArray, hostMac: ByteArray): ByteArray {
         require(hostMac.size == MAC_BYTES) { "hostMac must be $MAC_BYTES bytes" }
-        if (ipv6.size < ICMPV6_NA_MIN_BYTES || (ipv6[0].toInt() ushr 4 and 0x0f) != 6) return ipv6
-        if ((ipv6[IPV6_NEXT_HEADER_OFFSET].toInt() and 0xff) != ICMPV6_NEXT_HEADER ||
-            (ipv6[IPV6_HEADER_BYTES].toInt() and 0xff) != ICMPV6_NEIGHBOR_ADVERTISEMENT
-        ) return ipv6
+        if (!isNeighborAdvertisement(ipv6, ipv6.size)) return ipv6
 
         val payloadBytes = readU16(ipv6, IPV6_PAYLOAD_LENGTH_OFFSET)
         if (payloadBytes < ICMPV6_NA_BYTES || IPV6_HEADER_BYTES + payloadBytes > ipv6.size) return ipv6
@@ -109,6 +123,14 @@ object EthernetIpv6Codec {
         hostMac.copyInto(result, payloadEnd + 2)
         writeIcmpv6Checksum(result)
         return result
+    }
+
+    /** Only these packets need a private mutable copy for the existing NDP repair path. */
+    internal fun isNeighborAdvertisement(ipv6: ByteArray, length: Int): Boolean {
+        require(length >= 0 && length <= ipv6.size)
+        return length >= ICMPV6_NA_MIN_BYTES && (ipv6[0].toInt() ushr 4 and 0x0f) == 6 &&
+            (ipv6[IPV6_NEXT_HEADER_OFFSET].toInt() and 0xff) == ICMPV6_NEXT_HEADER &&
+            (ipv6[IPV6_HEADER_BYTES].toInt() and 0xff) == ICMPV6_NEIGHBOR_ADVERTISEMENT
     }
 
     private fun writeIcmpv6Checksum(ipv6: ByteArray) {

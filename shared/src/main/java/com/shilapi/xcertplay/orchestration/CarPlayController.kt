@@ -78,6 +78,7 @@ import com.shilapi.xcertplay.transport.LockdownPairingClient
 import com.shilapi.xcertplay.transport.LockdownPairRecord
 import com.shilapi.xcertplay.transport.NcmFunctionDiscovery
 import com.shilapi.xcertplay.transport.NcmUsbBridge
+import com.shilapi.xcertplay.transport.GeelyKernelNcmLink
 import java.io.Closeable
 import java.io.IOException
 import java.net.InetAddress
@@ -169,6 +170,24 @@ class CarPlayController(
 
     private enum class Phase { IDLE, MFI, WIRELESS, IPHONE, REENUMERATION, DATAPATHS, CONTROL }
 
+    /** Exactly one owner of the wired data plane; the kernel trial never falls back to USBFS. */
+    private sealed class WiredNcmTransport : Closeable {
+        abstract val hostMac: ByteArray?
+        abstract fun isOutputReady(): Boolean
+
+        class Usbfs(val pipe: NcmUsbBridge) : WiredNcmTransport() {
+            override val hostMac: ByteArray? get() = pipe.hostMac
+            override fun isOutputReady() = pipe.isOutputReady()
+            override fun close() = pipe.close()
+        }
+
+        class Kernel(val link: GeelyKernelNcmLink) : WiredNcmTransport() {
+            override val hostMac: ByteArray get() = link.hostMac
+            override fun isOutputReady() = link.isOutputReady()
+            override fun close() = link.close()
+        }
+    }
+
     private val appContext = context.applicationContext
     private val diagnosticAttempt = diagnosticAttempts.incrementAndGet()
     private val diagnosticRun = AtomicInteger()
@@ -254,6 +273,7 @@ class CarPlayController(
     private var ch341PermissionCloseable: Closeable? = null
     private var vpnLatch = CountDownLatch(1)
     private val teardownComplete = CountDownLatch(1)
+    @Volatile private var teardownSucceeded = false
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName, binder: IBinder) {
@@ -493,23 +513,25 @@ class CarPlayController(
         unbindVpn()
         Thread(
             {
+                var resourcesClosed = true
                 try {
                     if (config.transport == CarPlayTransport.WIRELESS) {
-                        closeBestEffort("wireless stack") { closeWirelessStack(service) }
+                        resourcesClosed = closeBestEffort("wireless stack") { closeWirelessStack(service) } && resourcesClosed
                     } else {
-                        closeBestEffort("CSM") { csm?.close() }
+                        resourcesClosed = closeBestEffort("CSM") { csm?.close() } && resourcesClosed
                         csm = null
                     }
-                    closeBestEffort("USBMUX") { mux?.close() }
-                    mux = null
+                    val muxClosed = closeBestEffort("USBMUX") { mux?.close() }
+                    resourcesClosed = muxClosed && resourcesClosed
+                    if (muxClosed) mux = null
                     if (config.transport == CarPlayTransport.WIRED) {
-                        closeBestEffort("VPN/NCM") { service?.detach() }
+                        resourcesClosed = closeBestEffort("VPN/NCM") { service?.detach() } && resourcesClosed
                     }
-                    closeBestEffort("MFi") { mfiSession?.close() }
+                    resourcesClosed = closeBestEffort("MFi") { mfiSession?.close() } && resourcesClosed
                     mfiSession = null
                     wirelessIdentification = null
                     wirelessAirPlayEndpoint = null
-                    closeBestEffort("location provider") { locationProvider?.close() }
+                    resourcesClosed = closeBestEffort("location provider") { locationProvider?.close() } && resourcesClosed
                 } finally {
                     executor.shutdownNow()
                     var executorTerminated = false
@@ -518,9 +540,10 @@ class CarPlayController(
                     } catch (_: InterruptedException) {
                         Thread.currentThread().interrupt()
                     }
+                    teardownSucceeded = resourcesClosed && executorTerminated
                     connectionDiagnostic(
                         "teardown end elapsedMs=${elapsedMillis(teardownStarted)} " +
-                            "executorTerminated=$executorTerminated",
+                            "executorTerminated=$executorTerminated clean=$teardownSucceeded",
                     )
                     teardownComplete.countDown()
                 }
@@ -551,7 +574,7 @@ class CarPlayController(
     fun awaitClosed(timeoutMillis: Long): Boolean {
         require(timeoutMillis >= 0) { "timeoutMillis must not be negative" }
         return try {
-            teardownComplete.await(timeoutMillis, TimeUnit.MILLISECONDS)
+            teardownComplete.await(timeoutMillis, TimeUnit.MILLISECONDS) && teardownSucceeded
         } catch (_: InterruptedException) {
             Thread.currentThread().interrupt()
             false
@@ -1678,7 +1701,7 @@ class CarPlayController(
         }
     }
 
-    private fun openNcm(device: UsbDevice): NcmUsbBridge {
+    private fun openNcm(device: UsbDevice): WiredNcmTransport {
         val connection = iphoneHost.openConnection(device)
             ?: throw IphoneUsbException.DeviceUnavailable("Could not open the iPhone NCM connection")
         var bridgeOwnsConnection = false
@@ -1707,13 +1730,21 @@ class CarPlayController(
                     " status=${function.statusIn?.address?.let { "0x${it.toString(16)}" } ?: "none"}" +
                     " in=0x${function.bulkIn.address.toString(16)} out=0x${function.bulkOut.address.toString(16)}",
             )
-            return NcmUsbBridge.open(connection, function, ::debugLog).also { bridgeOwnsConnection = true }
+            if (GeelyKernelNcmLink.isEnabled(appContext)) {
+                // Keep cdc_ncm bound to control/data. The temporary descriptor fd owns no interface.
+                return WiredNcmTransport.Kernel(
+                    GeelyKernelNcmLink.open(device, function, connection.rawDescriptors, ::connectionDiagnostic),
+                )
+            }
+            return WiredNcmTransport.Usbfs(
+                NcmUsbBridge.open(connection, function, ::debugLog).also { bridgeOwnsConnection = true },
+            )
         } finally {
             if (!bridgeOwnsConnection) connection.close()
         }
     }
 
-    private fun runStack(usbSession: Iap2UsbSession, ncm: NcmUsbBridge) {
+    private fun runStack(usbSession: Iap2UsbSession, ncm: WiredNcmTransport) {
         phase = Phase.CONTROL
         var ncmOwnedLocally = true
         try {
@@ -1802,11 +1833,11 @@ class CarPlayController(
 
             val ncmHostMac = ncm.hostMac ?: config.hostMac
             debugLog("ncm using hostMac=${ncmHostMac.macString()}")
-            if (!attachVpn(ncm, ncmHostMac)) {
-                throw IphoneUsbException.DeviceUnavailable("Could not attach the NCM/VPN AirPlay transport")
+            if (!attachWiredNetwork(ncm, ncmHostMac)) {
+                throw IphoneUsbException.DeviceUnavailable("Could not attach the wired AirPlay transport")
             }
             ncmOwnedLocally = false
-            debugLog("wired NCM/VPN AirPlay transport attached")
+            debugLog("wired ${if (ncm is WiredNcmTransport.Kernel) "kernel NCM" else "NCM/VPN"} AirPlay transport attached")
             if (closed) {
                 vpnService?.detach()
                 return
@@ -1814,8 +1845,13 @@ class CarPlayController(
 
             val mfi = mfiSession?.client
                 ?: throw IphoneUsbException.DeviceUnavailable("MFi coprocessor client is unavailable")
+            val advertisedAddress = if (ncm is WiredNcmTransport.Kernel) {
+                val bound = vpnService?.boundAddress()
+                    ?: throw IphoneUsbException.DeviceUnavailable("Kernel USB AirPlay server has no bound address")
+                hostAddressText(bound)
+            } else config.linkLocal
             val endpoint = Iap2WiredCarPlayEndpoint(
-                ipv6Addresses = listOf(config.linkLocal),
+                ipv6Addresses = listOf(advertisedAddress),
                 airPlayPort = vpnService?.boundPort() ?: airPlayConfig.port,
                 publicKey = identity.publicKeyHex,
                 sourceVersion = airPlayConfig.sourceVersion,
@@ -2142,7 +2178,7 @@ class CarPlayController(
         return text
     }
 
-    private fun closeBestEffort(name: String, close: () -> Unit) {
+    private fun closeBestEffort(name: String, close: () -> Unit): Boolean {
         val started = System.nanoTime()
         var completed = false
         try {
@@ -2153,6 +2189,7 @@ class CarPlayController(
         } finally {
             connectionDiagnostic("teardown resource=$name completed=$completed elapsedMs=${elapsedMillis(started)}")
         }
+        return completed
     }
 
     private fun controlLoopTimeoutMillis(): Long = when {
@@ -2161,26 +2198,27 @@ class CarPlayController(
         else -> CONTROL_LOOP_TIMEOUT_MILLIS
     }
 
-    private fun attachVpn(ncm: NcmUsbBridge, hostMac: ByteArray): Boolean {
+    private fun attachWiredNetwork(ncm: WiredNcmTransport, hostMac: ByteArray): Boolean {
         onStatus(CarPlayStatus.AttachingNetwork)
         val service = awaitVpnService() ?: run {
             debugLog("wired VPN service bind failed")
             ncm.close()
             return false
         }
-        debugLog("wired VPN service bound; attaching NCM transport")
+        debugLog("wired service bound; attaching ${if (ncm is WiredNcmTransport.Kernel) "kernel" else "VPN"} NCM transport")
         val result = try {
-            service.attach(
-                ncm = ncm,
-                linkLocal = config.linkLocal,
-                hostMac = hostMac,
-                config = airPlayConfig,
-                identity = identity,
-                pairings = pairings,
-                mfi = mfiSession?.client,
-                listener = sessionListener,
-                media = media,
-            )
+            when (ncm) {
+                is WiredNcmTransport.Usbfs -> service.attach(
+                    ncm = ncm.pipe, linkLocal = config.linkLocal, hostMac = hostMac,
+                    config = airPlayConfig, identity = identity, pairings = pairings,
+                    mfi = mfiSession?.client, listener = sessionListener, media = media,
+                )
+                is WiredNcmTransport.Kernel -> service.attachKernelNcm(
+                    link = ncm.link, bindAddress = ncm.link.awaitAddress({ closed }),
+                    config = airPlayConfig, identity = identity, pairings = pairings,
+                    mfi = mfiSession?.client, listener = sessionListener, media = media,
+                )
+            }
         } catch (error: Throwable) {
             ncm.close()
             onStatus(CarPlayStatus.Failed(error.message ?: error.javaClass.simpleName))

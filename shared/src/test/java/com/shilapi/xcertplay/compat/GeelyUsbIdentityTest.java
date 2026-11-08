@@ -5,6 +5,18 @@ import static org.junit.Assert.*;
 
 public final class GeelyUsbIdentityTest {
     private static final String SHA = GeelyUsbIdentity.sha256(new byte[]{1, 2, 3});
+    @Test public void descriptorHashesPreserveAllBytesAndLowercasePadding() throws Exception {
+        assertEquals("e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+                GeelyUsbIdentity.sha256(new byte[0]));
+        assertEquals("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+                GeelyUsbIdentity.sha256("abc".getBytes("US-ASCII")));
+        byte[] allBytes = new byte[256];
+        for (int i = 0; i < allBytes.length; ++i) allBytes[i] = (byte) i;
+        assertEquals("40aff2e9d2d8922e47afd4648e6967497158785fbd1da870e7110266bf944880",
+                GeelyUsbIdentity.sha256(allBytes));
+        try { GeelyUsbIdentity.sha256(null); fail("Null descriptors must remain rejected"); }
+        catch (IllegalArgumentException expected) { }
+    }
     @Test public void canonicalPathAndCompleteEnumerationEquality() {
         GeelyUsbIdentity identity = identity("1-2.3", 1, 7, SHA);
         assertEquals("/dev/bus/usb/001/007", identity.devicePath());

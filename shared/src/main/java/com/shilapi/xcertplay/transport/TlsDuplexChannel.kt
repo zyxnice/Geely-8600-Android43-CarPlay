@@ -361,20 +361,34 @@ class TlsDuplexChannel private constructor(
     private class ByteQueue {
         private var bytes = ByteArray(0)
         private var offset = 0
+        private var end = 0
 
         val size: Int
-            get() = bytes.size - offset
+            get() = end - offset
 
         fun append(value: ByteArray) {
             if (value.isEmpty()) return
             if (size > MAXIMUM_TLS_BUFFER_BYTES - value.size) {
                 throw IphoneUsbException.Protocol("TLS buffered data exceeds the defensive limit")
             }
-            val combined = ByteArray(size + value.size)
-            bytes.copyInto(combined, 0, offset)
-            value.copyInto(combined, size)
-            bytes = combined
-            offset = 0
+            if (value.size > bytes.size - end) {
+                val pending = size
+                val required = pending + value.size
+                if (required > bytes.size) {
+                    val capacity = maxOf(required, maxOf(RECEIVE_CHUNK_BYTES, bytes.size * 2))
+                        .coerceAtMost(MAXIMUM_TLS_BUFFER_BYTES)
+                    val grown = ByteArray(capacity)
+                    bytes.copyInto(grown, 0, offset, end)
+                    bytes = grown
+                } else {
+                    bytes.copyInto(bytes, 0, offset, end)
+                }
+                offset = 0
+                end = pending
+            }
+            // Input arrays may belong to the transport/engine; never adopt their ownership.
+            value.copyInto(bytes, end)
+            end += value.size
         }
 
         fun asByteBuffer(): ByteBuffer = ByteBuffer.wrap(bytes, offset, size).slice()
@@ -382,9 +396,12 @@ class TlsDuplexChannel private constructor(
         fun discard(count: Int) {
             require(count in 0..size) { "Invalid TLS queue discard" }
             offset += count
-            if (offset == bytes.size) {
-                bytes = ByteArray(0)
+            if (offset == end) {
+                // Keep one ordinary read's storage, but release exceptional large records.
+                // Empty retained capacity must never appear as ciphertext/plaintext input.
+                if (bytes.size > RECEIVE_CHUNK_BYTES) bytes = ByteArray(0)
                 offset = 0
+                end = 0
             }
         }
 

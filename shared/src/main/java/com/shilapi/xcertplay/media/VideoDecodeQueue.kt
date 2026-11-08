@@ -51,8 +51,16 @@ internal class VideoDecodeQueue(
             discardFrames()
         }
         if (job is VideoJob.Frame) {
-            val frames = jobs.filterIsInstance<VideoJob.Frame>()
-            if (frames.size >= maxFrames || frames.sumOf { it.nalus.size.toLong() } + job.nalus.size > maxBytes) {
+            // Count without allocating a temporary frame list on every video input. Keep the
+            // existing concurrent-consumer snapshot semantics rather than adding a second
+            // occupancy state that could drift from the blocking queue during poll/discard.
+            var frames = 0
+            var frameBytes = 0L
+            for (queued in jobs) if (queued is VideoJob.Frame) {
+                frames++
+                frameBytes += queued.nalus.size
+            }
+            if (frames >= maxFrames || frameBytes + job.nalus.size > maxBytes) {
                 discardFrames()
                 jobs.offer(VideoJob.Resync())
             }

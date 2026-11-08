@@ -1,0 +1,20 @@
+{
+  "status": "on-car picture and touch smoothness accepted; startup retries unresolved",
+  "date": "2026-11-08",
+  "branch": "milestone/usb-smooth-userspace-ncm-20261108",
+  "source_parent": "c690d8a47474b06bb430fd16e4213046f4b5715c",
+  "apk": "DiPlay-8600-userspace-ncm-20261108-4c21a50c057a.apk",
+  "sha256": "4c21a50c057a1603723dc98f1689f8782820b5fe8375a86368a37798bf51326e",
+  "bytes": 5338322,
+  "url": "https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-userspace-ncm-20261108-4c21a50c057a.apk",
+  "package": "com.shihab.diplay.repair1.geely8600",
+  "version_code": 29,
+  "version_name": "0.2.10-H53-USB3-B",
+  "GEELY_KERNEL_NCM": false,
+  "GEELY_USB_RUNTIME_RECOVERY": false,
+  "display": "1920x720 at configured 30fps",
+  "usb_condition": "HOST + CDP; single cable in left data port; right port empty",
+  "baseline_apk_sha256": "95a3b98597eadb4ac484bf41515656339af6ff2e3ea5559e99e2cc095036e84a",
+  "changed_non_signature_payloads": ["AndroidManifest.xml"],
+  "clean_source_build_is_byte_identical_to_installed_apk": false
+}

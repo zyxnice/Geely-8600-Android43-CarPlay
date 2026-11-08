@@ -14,9 +14,9 @@
 
 shared全量lint仍有既有问题，不能将构建成功表述为全量lint通过。HUD真实显示与异常恢复依赖独立实车验收。11月1日trial2的817项测试和默认关闭行为保留在[历史状态](GEELY-8600-STATUS.md)，不描述当前源码。
 
-### 2026-11-08 画面流畅里程碑分支的 USB 准备整合
+### 2026-11-08 main 收录的画面流畅版本与 USB 准备
 
-当前分支 `milestone/usb-smooth-userspace-ncm-20261108` 保留已归档的用户态 NCM 传输、音视频及触控实现，
+main 合入 `milestone/usb-smooth-userspace-ncm-20261108`，保留已归档的用户态 NCM 传输、音视频及触控实现，
 合入 APP 运行时 Host（0）＋CDP 准备和受限内核网卡 UP 代码。
 `GEELY_USB_RUNTIME_RECOVERY=true`，`GEELY_KERNEL_NCM=false`；后者继续选择用户态 NCM/VPN，
 因此新增内核网卡 UP 功能在本分支默认路径不执行，不会扫描并启用其他网卡。
@@ -33,10 +33,12 @@ shared全量lint仍有既有问题，不能将构建成功表述为全量lint通
 失败/取消/关闭不DOWN，不设置IP、路由、DNS或IPv6开关。6秒租约、调用端最多等待7秒、helper看门狗8秒，
 挂起Binder保持单飞；取消无法撤销已发出的ioctl，最终校验到按名称操作仍有有限竞态。
 
-这次是源码整合后的新候选，不是历史实车包 `4c21a50c057a` 的重新验收。
+源码 `3c6cc29` 已构建为独立认证包 `c0628c96dede` 并实车覆盖安装，用户随后确认验证后无明显大问题；
+安装身份与验收范围见[当前版本记录](USB-HOST-CDP-ACCEPTANCE-20261108.md)。应用代码保持该实测提交，main 后续只补文档。
+这不改变历史实车包 `4c21a50c057a` 的身份和验证范围。
 原安装包记录及下载保持在[11月8日里程碑](USB-SMOOTHNESS-MILESTONE-20261108.md)，
 新代码的本地证据和未覆盖项见[整合记录](aegis/work/2026-11-08-smooth-usb-integration/20-checkpoint.md)，
-内核UP边界见 [ADR-0012](adr/ADR-0012-kernel-ncm-interface-preparation.md)。不把构建成功当作实车自动连接或流畅度通过。
+内核UP边界见 [ADR-0012](adr/ADR-0012-kernel-ncm-interface-preparation.md)。首次连接成功率、冷启动及长期稳定性仍需独立验收。
 
 使用仓库内 Gradle wrapper；以下命令在 Windows PowerShell 仓库根目录执行：
 

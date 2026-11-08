@@ -38,7 +38,7 @@ final class GeelyUsbOemBridge {
                 GeelyUsbRuntimeHelper.ENTRY_POINT, new String[] {Long.toString(deadline), lease.getCanonicalPath(), nonce,
                         operation}));
         java.util.regex.Matcher ok = java.util.regex.Pattern.compile(
-                "GEELY_RUNTIME_OK:(ready|prepared|active-preserved|device-preserved|not-ready|enumeration-restarted|boot-role-recovered)").matcher(result);
+                "GEELY_RUNTIME_OK:(ready|prepared|active-preserved|boot-role-recovered)").matcher(result);
         if (ok.find()) return ok.group(1);
         java.util.regex.Matcher failure = java.util.regex.Pattern.compile("GEELY_RUNTIME_FAILED:([a-z_]{1,64})").matcher(result);
         throw new IOException(failure.find() ? failure.group(1) : "runtime_no_verified_response");
@@ -55,6 +55,26 @@ final class GeelyUsbOemBridge {
         if (ok.find()) return ok.group(1);
         java.util.regex.Matcher failure = java.util.regex.Pattern.compile("GEELY_VPN_FAILED:([a-z_]{1,64})").matcher(result);
         throw new IOException(failure.find() ? failure.group(1) : "vpn_no_verified_response");
+    }
+
+    /** Fixed current-enumeration NIC-UP protocol; no caller-selected command or filesystem target. */
+    String enableKernelNcm(File helperDex, File runtimeDirectory, long deadline, File lease, String nonce,
+            String boot, GeelyKernelNcmUpPolicy.Request request) throws IOException {
+        if (request == null || !lease.getCanonicalFile().getParentFile().equals(helperDex.getCanonicalFile().getParentFile())
+                || !nonce.matches("[a-f0-9]{32}") || !lease.getName().equals("ncm-" + nonce + ".lease")
+                || !GeelyVpnConsentPolicy.validBootId(boot)) throw new IOException("ncm_arguments");
+        String[] identity = request.arguments();
+        String[] arguments = new String[4 + identity.length];
+        arguments[0] = Long.toString(deadline);
+        arguments[1] = lease.getCanonicalPath();
+        arguments[2] = nonce;
+        arguments[3] = boot;
+        System.arraycopy(identity, 0, arguments, 4, identity.length);
+        String result = execute(buildHelperCommand(helperDex, runtimeDirectory, GeelyKernelNcmUpHelper.ENTRY_POINT, arguments));
+        java.util.regex.Matcher ok = java.util.regex.Pattern.compile("GEELY_NCM_OK:(enabled|already-up)").matcher(result);
+        if (ok.find()) return ok.group(1);
+        java.util.regex.Matcher failed = java.util.regex.Pattern.compile("GEELY_NCM_FAILED:([a-z_]{1,64})").matcher(result);
+        throw new IOException(failed.find() ? failed.group(1) : "ncm_no_verified_response");
     }
 
     private String execute(String command) throws IOException {

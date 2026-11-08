@@ -100,5 +100,7 @@ class CarPlayKernelNcmAttachmentTest {
         override fun interfaceFlags(name: String) = flags
         override fun ipv6Table() = "fe800000000000000000000000000001 9d 40 20 80 usb1"
         override fun txPackets(name: String) = 0L
+        override fun enableInterface(expected: KernelNcmInterface, dataInterfaceId: Int, dataAlternate: Int,
+                                     isCancelled: () -> Boolean) { fail("Attachment cannot prepare a NIC") }
     }
 }

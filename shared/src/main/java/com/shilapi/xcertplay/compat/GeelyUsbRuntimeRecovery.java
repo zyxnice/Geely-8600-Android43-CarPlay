@@ -23,7 +23,6 @@ public final class GeelyUsbRuntimeRecovery {
     private volatile boolean stopped;
     private volatile File activeLease;
     private String summary = "not-run";
-    private final GeelyUsbRuntimePolicy.EnumerationWait enumerationWait = new GeelyUsbRuntimePolicy.EnumerationWait();
 
     public GeelyUsbRuntimeRecovery(Context context) { this.context = context.getApplicationContext(); }
 
@@ -46,11 +45,6 @@ public final class GeelyUsbRuntimeRecovery {
     }
     public synchronized String summary() { return summary; }
 
-    /** Records discovery on the USB worker; only initial discovery can act on this timer. */
-    public synchronized void observedDiscovery(boolean applePresent) {
-        enumerationWait.observed(applePresent, SystemClock.elapsedRealtime());
-    }
-
     /** Returns false during the bounded settle interval; the controller keeps its normal discovery poll. */
     public synchronized boolean prepare() throws IOException {
         if (stopped || Thread.currentThread().isInterrupted()) throw new IOException("runtime_cancelled");
@@ -59,22 +53,20 @@ public final class GeelyUsbRuntimeRecovery {
         // A previous controller may still be rolling back after its lease was revoked.
         // Do not trust a transient ready snapshot or open a data path until it has exited.
         if (operationPending()) { summary = "waiting-for-previous-operation"; return false; }
+        // Host/CDP already satisfies preparation, even if no phone is enumerated yet.
+        // An empty device list must not turn this no-op into a delayed power cycle.
+        if (locallyReady()) { summary = "ready"; return true; }
         long now = SystemClock.elapsedRealtime();
-        // Poll locally first, avoiding privileged helper launches in the steady waiting state.
-        boolean ready = locallyReady();
-        if (!ready) enumerationWait.resetWaiting();
-        // The mode-repair cooldown must not extend the independent empty-discovery wait.
-        if (!ready && now - lastAttempt < 5000) return false;
-        final boolean recoverEnumeration = ready && enumerationWait.claimRecovery(now);
-        if (ready && !recoverEnumeration) { summary = "ready"; return true; }
-        if (!recoverEnumeration && changes >= 3) throw new IOException("USB模式被系统反复切回，请保存连接日志后重试");
+        if (now - lastAttempt < 5000) return false;
+        if (changes >= 3) throw new IOException("USB模式被系统反复切回，请保存连接日志后重试");
         lastAttempt = now;
         final File dex = new GeelyUsbFdBroker(context).prepareHelper();
         final String nonce = java.util.UUID.randomUUID().toString().replace("-", "");
         final File lease = new File(dex.getParentFile(), "runtime-" + nonce + ".lease");
         final long deadline = SystemClock.elapsedRealtime() + 6000;
-        final String operation = recoverEnumeration ? "recover-enumeration"
-                : (stalledRole() ? "recover-boot-role" : "prepare");
+        final String operation = stalledRole() ? "recover-boot-role" : "prepare";
+        Log.i(TAG, "8600 runtime preparation requested operation=" + operation
+                + " targetRole=0 targetCharging=" + GeelyUsbRuntimePolicy.TARGET_CHARGING_MODE);
         FutureTask<String> task;
         synchronized (GeelyUsbRuntimeRecovery.class) {
             if (operationPending()) return false;
@@ -140,7 +132,8 @@ public final class GeelyUsbRuntimeRecovery {
     private static boolean locallyReady() {
         try {
             return "0".equals(GeelyUsbRuntimeHelper.text("/proc/driver/usbroleswitch/0/mode"))
-                    && "sdp".equals(GeelyUsbRuntimeHelper.text("/sys/class/otg_peripheral/charging_mode"))
+                    && GeelyUsbRuntimePolicy.TARGET_CHARGING_MODE.equals(
+                            GeelyUsbRuntimeHelper.text("/sys/class/otg_peripheral/charging_mode"))
                     && GeelyUsbRuntimePolicy.isPowered(GeelyUsbRuntimeHelper.text("/sys/class/otg_peripheral/power"))
                     && GeelyUsbRuntimePolicy.isHealthy(GeelyUsbRuntimeHelper.text("/sys/class/otg_peripheral/pin_fault/status"));
         } catch (IOException unavailable) { return false; }

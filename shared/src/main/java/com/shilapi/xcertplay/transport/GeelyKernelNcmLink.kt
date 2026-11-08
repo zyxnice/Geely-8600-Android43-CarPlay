@@ -7,6 +7,8 @@ import android.os.SystemClock
 import com.shilapi.xcertplay.compat.GeelyUsbDeviceAccess
 import com.shilapi.xcertplay.compat.GeelyUsbDescriptorParser
 import com.shilapi.xcertplay.compat.GeelyUsbIdentity
+import com.shilapi.xcertplay.compat.GeelyKernelNcmPreparation
+import com.shilapi.xcertplay.compat.GeelyKernelNcmUpPolicy
 import java.io.ByteArrayOutputStream
 import java.io.Closeable
 import java.io.File
@@ -15,8 +17,8 @@ import java.net.Inet6Address
 import java.util.concurrent.atomic.AtomicBoolean
 
 /**
- * Read-only binding to the existing H53 cdc_ncm driver. The application never changes interface
- * flags, IPv6 settings, USB configuration, routes or DNS through this owner.
+ * Binding to the existing H53 cdc_ncm driver. Address preparation may enable this pinned NIC
+ * once per binding, but never changes IPv6 settings, USB configuration, routes or DNS.
  *
  * Discovery/address waits run off-main. Closing stops this binding, leaving the system NIC intact.
  */
@@ -28,6 +30,7 @@ class GeelyKernelNcmLink internal constructor(
 ) : Closeable {
     private val closed = AtomicBoolean(false)
     private val mac = initial.mac.copyOf()
+    private val preparationAttempted = AtomicBoolean(false)
     private var attachmentTxPackets: Long? = null
     @Volatile private var attachedAddress: Inet6Address? = null
 
@@ -36,13 +39,24 @@ class GeelyKernelNcmLink internal constructor(
     /** The kernel NIC's six-byte Ethernet address; each caller receives a copy. */
     val hostMac: ByteArray get() = mac.copyOf()
 
-    /** Wait only for an existing, non-tentative link-local address; never prepare the system NIC. */
+    /** Enable a DOWN NIC once, then wait for a non-tentative link-local address on this enumeration. */
     fun awaitAddress(isCancelled: () -> Boolean, timeoutMillis: Long = 2_000): Inet6Address {
+        if (isCancelled() || closed.get()) throw IOException("Kernel USB binding cancelled")
+        requireCurrent()
+        if (!isUp()) {
+            if (!preparationAttempted.compareAndSet(false, true))
+                throw IphoneUsbException.DeviceUnavailable("Kernel USB network is down after its preparation attempt")
+            io.enableInterface(initial, dataInterfaceId, dataAlternate) { isCancelled() || closed.get() }
+            if (isCancelled() || closed.get()) throw IOException("Kernel USB binding cancelled")
+            requireCurrent()
+            if (!isUp()) throw IphoneUsbException.DeviceUnavailable("Kernel USB interface UP was not verified")
+        }
+        // The bounded privileged preparation must not consume the address-autoconfiguration wait.
         val deadline = SystemClock.elapsedRealtime() + timeoutMillis
         do {
             if (isCancelled() || closed.get()) throw IOException("Kernel USB binding cancelled")
             requireCurrent()
-            if (!isUp()) throw IphoneUsbException.DeviceUnavailable("Kernel USB network is down; manual preparation is required")
+            if (!isUp()) throw IphoneUsbException.DeviceUnavailable("Kernel USB network went down while waiting for IPv6")
             currentAddress()?.let { return it }
             try { Thread.sleep(50) } catch (error: InterruptedException) {
                 Thread.currentThread().interrupt()
@@ -120,16 +134,17 @@ class GeelyKernelNcmLink internal constructor(
         } catch (_: PackageManager.NameNotFoundException) { false }
 
         /** Bind the selected USB enumeration to its actual kernel-owned NCM control interface. */
-        fun open(device: UsbDevice, function: NcmFunctionDiscovery.NcmFunction, descriptors: ByteArray,
+        fun open(context: Context, device: UsbDevice, function: NcmFunctionDiscovery.NcmFunction, descriptors: ByteArray,
                  diagnostic: (String) -> Unit): GeelyKernelNcmLink {
+            val io = SystemKernelNcmIo(context, diagnostic)
             val candidates = File(NET_CLASS).listFiles().orEmpty().mapNotNull {
-                SystemKernelNcmIo.readInterface(it.name, function.data.id)
+                io.readInterface(it.name, function.data.id)
             }
             val selected = selectInterface(device.deviceName, device.vendorId, device.productId,
                 GeelyUsbIdentity.sha256(descriptors), function.control.id, candidates)
             diagnostic("kernel NCM selected iface=${selected.name} ifindex=${selected.ifindex} " +
                 "usb=${selected.identity.devicePath()} control=${selected.interfaceNumber} driver=${selected.driver}")
-            return GeelyKernelNcmLink(selected, function.data.id, function.dataAlternate, SystemKernelNcmIo)
+            return GeelyKernelNcmLink(selected, function.data.id, function.dataAlternate, io)
         }
 
         internal fun selectInterface(devicePath: String, vendorId: Int, productId: Int, descriptorSha256: String,
@@ -183,15 +198,29 @@ internal data class KernelNcmInterface(
     val dataAlternate: Int,
 )
 
-/** Read-only kernel boundary. No method can bring up an interface or change its configuration. */
+/** Kernel facts plus a fixed UP operation; no DOWN or address/routing mutation is exposed. */
 internal interface KernelNcmIo {
     fun readInterface(name: String, dataInterfaceId: Int): KernelNcmInterface?
     fun interfaceFlags(name: String): Int
     fun ipv6Table(): String
     fun txPackets(name: String): Long
+    fun enableInterface(expected: KernelNcmInterface, dataInterfaceId: Int, dataAlternate: Int,
+                        isCancelled: () -> Boolean)
 }
 
-private object SystemKernelNcmIo : KernelNcmIo {
+private class SystemKernelNcmIo(context: Context, private val diagnostic: (String) -> Unit) : KernelNcmIo {
+    private val preparation = GeelyKernelNcmPreparation(context)
+
+    override fun enableInterface(expected: KernelNcmInterface, dataInterfaceId: Int, dataAlternate: Int,
+                                 isCancelled: () -> Boolean) {
+        val request = GeelyKernelNcmUpPolicy.Request(expected.identity, expected.name, expected.ifindex,
+            expected.mac.joinToString("") { "%02x".format(it.toInt() and 0xff) },
+            expected.interfaceNumber, dataInterfaceId, dataAlternate)
+        diagnostic("kernel NCM interface UP requested iface=${expected.name} ifindex=${expected.ifindex}")
+        val result = preparation.enable(request, GeelyKernelNcmPreparation.Cancellation { isCancelled() })
+        diagnostic("kernel NCM interface preparation result=$result iface=${expected.name} ifindex=${expected.ifindex}")
+    }
+
     override fun readInterface(name: String, dataInterfaceId: Int): KernelNcmInterface? {
         return try {
             if (!name.matches(Regex("[a-zA-Z0-9_.:-]{1,15}"))) return null

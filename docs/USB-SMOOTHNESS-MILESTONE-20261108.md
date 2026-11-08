@@ -37,3 +37,13 @@ APK按项目约定存放在测试分发位置，不把安装包、认证资产�
 构建方式仍见[BUILD.md](BUILD.md)，使用显式认证输入及`-PgeelyPerformanceStage=B`。候选准备阶段shared/common测试最终为761/178项、失败0，shared跳过3；首次全量运行有一个依赖全局线程枚举的既有测试失败，隔离及全量复跑通过，未改测试。分支归档仅核对源码/包身份、差异与资料，不把既有构建或短时实车反馈扩写成全面验收。
 
 机器可读安装包记录：[userspace-smooth-20261108.json](milestones/userspace-smooth-20261108.json)。
+
+## 后续源码整合：APP USB 准备
+
+用户随后要求将 Host＋CDP 和内核网卡启用代码合入本分支。
+新源码开启 `GEELY_USB_RUNTIME_RECOVERY=true`，继续保持 `GEELY_KERNEL_NCM=false`，保留本页实测的用户态传输与音视频/触控实现。
+网卡UP代码只在显式内核路径执行，默认用户态连接不调用。已Host/CDP或网卡已UP时跳过对应变更，
+不改系统默认/persist/ADB设置；Host运行态切换仍可能断开该口有线ADB。现场未操作、未安装新包。
+
+以上是本分支后续源码行为，不改变本页原始安装包hash、两个关闭的metadata及实车反馈；
+新构建需独立实车验收。详见[整合记录](aegis/work/2026-11-08-smooth-usb-integration/20-checkpoint.md)。

@@ -1733,7 +1733,7 @@ class CarPlayController(
             if (GeelyKernelNcmLink.isEnabled(appContext)) {
                 // Keep cdc_ncm bound to control/data. The temporary descriptor fd owns no interface.
                 return WiredNcmTransport.Kernel(
-                    GeelyKernelNcmLink.open(device, function, connection.rawDescriptors, ::connectionDiagnostic),
+                    GeelyKernelNcmLink.open(appContext, device, function, connection.rawDescriptors, ::connectionDiagnostic),
                 )
             }
             return WiredNcmTransport.Usbfs(

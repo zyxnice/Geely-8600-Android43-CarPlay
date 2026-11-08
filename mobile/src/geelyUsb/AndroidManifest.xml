@@ -18,8 +18,8 @@
         <!-- Absent in ordinary builds: the code's explicit default is false. -->
         <meta-data
             android:name="com.shilapi.xcertplay.GEELY_USB_RUNTIME_RECOVERY"
-            android:value="false" />
-        <!-- Controlled user-space NCM comparison; runtime USB preparation remains disabled. -->
+            android:value="true" />
+        <!-- Preserve the smooth-picture userspace NCM path; kernel-only NIC preparation stays dormant. -->
         <meta-data android:name="com.shilapi.xcertplay.GEELY_KERNEL_NCM" android:value="false" />
         <meta-data
             android:name="com.shilapi.xcertplay.GEELY_USB_BYPASS"

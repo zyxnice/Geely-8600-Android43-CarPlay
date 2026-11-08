@@ -9,7 +9,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.lang.reflect.Method;
 
-/** One-shot OEM child for fixed preparation/enumeration recovery; no caller-supplied shell or paths. */
+/** One-shot OEM child for fixed preparation/boot-role recovery; no caller-supplied shell or paths. */
 public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
     static final String ENTRY_POINT = "com.shilapi.xcertplay.compat.GeelyUsbRuntimeHelper";
     private static final String OTG = "/sys/class/otg_peripheral/";
@@ -55,7 +55,6 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
             }
             String result;
             if ("recover-boot-role".equals(arguments[3])) result = GeelyUsbRuntimePolicy.recoverBootRole(port);
-            else if ("recover-enumeration".equals(arguments[3])) result = GeelyUsbRuntimePolicy.recoverEnumeration(port);
             else result = GeelyUsbRuntimePolicy.prepare(port);
             System.out.println("GEELY_RUNTIME_OK:" + result);
             android.util.Log.i("GeelyUsbRuntime", "Runtime operation=" + arguments[3] + " result=" + result);
@@ -68,8 +67,7 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
     }
 
     static boolean validOperation(String operation) {
-        return "prepare".equals(operation) || "recover-enumeration".equals(operation)
-                || "recover-boot-role".equals(operation);
+        return "prepare".equals(operation) || "recover-boot-role".equals(operation);
     }
 
     private void checkDeadline() throws IOException {
@@ -84,7 +82,7 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
     @Override public void beginRollback() { rollingBack = true; }
 
     @Override public void awaitPowerOff() throws Exception {
-        // Allow the phone to observe VBUS removal before restoring the existing Host port.
+        // Let the OTG supply settle before restoring it; a second charging leg can keep the phone powered.
         checkDeadline();
         Thread.sleep(500);
         checkDeadline();
@@ -140,6 +138,8 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
             throw new IOException("runtime_config_value");
         Class<?> properties = Class.forName("android.os.SystemProperties");
         properties.getDeclaredMethod("set", String.class, String.class).invoke(null, "sys.usb.config", value);
+        android.util.Log.i("GeelyUsbRuntime", "Runtime configuration requested config=" + value
+                + " rollback=" + rollingBack);
     }
 
     @Override public void power(String value) throws Exception {
@@ -149,7 +149,7 @@ public final class GeelyUsbRuntimeHelper implements GeelyUsbRuntimePolicy.Port {
 
     @Override public void charging(String value) throws Exception {
         if (!"sdp".equals(value) && !"cdp".equals(value) && !"dcp".equals(value)) throw new IOException("runtime_charge_value");
-        // H53 UsbProtectProvider transaction 8 writes exactly this node (2 -> sdp).
+        // H53 UsbProtectProvider transaction 8 writes exactly this node (1 -> cdp, 2 -> sdp).
         // Avoid a nested synchronous Binder call back into the launching OEM daemon.
         write(OTG + "charging_mode", value);
     }

@@ -83,5 +83,7 @@ class GeelyKernelNcmLinkTest {
         override fun interfaceFlags(name: String) = flags
         override fun ipv6Table() = table
         override fun txPackets(name: String) = tx
+        override fun enableInterface(expected: KernelNcmInterface, dataInterfaceId: Int, dataAlternate: Int,
+                                     isCancelled: () -> Boolean) { fail("This test must not enable a NIC") }
     }
 }

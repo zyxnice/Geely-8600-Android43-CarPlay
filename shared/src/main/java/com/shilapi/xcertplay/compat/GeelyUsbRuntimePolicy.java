@@ -6,6 +6,8 @@ import java.io.IOException;
 public final class GeelyUsbRuntimePolicy {
     static final String HOST_CONFIG = "accessory,ncm";
     static final String ADB_CONFIG = "accessory,ncm,adb";
+    // CDP permits wired data and charging; this target applies only to runtime preparation.
+    static final String TARGET_CHARGING_MODE = "cdp";
 
     /** The always-present root-hub interface is not a downstream attachment. */
     static boolean occupiesOtgBus(String sysfsName) {
@@ -47,8 +49,7 @@ public final class GeelyUsbRuntimePolicy {
             this.bootRecoveryDevice = bootRecoveryDevice;
         }
         boolean powered() { return isPowered(power); }
-        boolean ready() { return "0".equals(role) && powered() && "sdp".equals(charging) && isHealthy(fault); }
-        boolean enumerationReady() { return ready() && HOST_CONFIG.equals(config) && HOST_CONFIG.equals(appliedConfig); }
+        boolean ready() { return "0".equals(role) && powered() && TARGET_CHARGING_MODE.equals(charging) && isHealthy(fault); }
     }
 
     /** Only the observed H53 pre-CarPlay boot state permits detaching an enumerated phone. */
@@ -92,59 +93,6 @@ public final class GeelyUsbRuntimePolicy {
         }
     }
 
-    /** One empty-discovery recovery per connection owner; a phone appearing restarts the wait. */
-    static final class EnumerationWait {
-        private long emptySince = -1;
-        private boolean attempted;
-
-        void observed(boolean applePresent, long now) {
-            if (applePresent) emptySince = -1;
-            else if (emptySince < 0) emptySince = now;
-        }
-
-        void resetWaiting() { emptySince = -1; }
-
-        boolean claimRecovery(long now) {
-            if (attempted || emptySince < 0 || now - emptySince < 2000) return false;
-            attempted = true;
-            return true;
-        }
-    }
-
-    /** Only an empty, healthy Host port may be power-cycled; never detach an enumerated device. */
-    static String recoverEnumeration(Port port) throws Exception {
-        State before = port.read();
-        validate(before);
-        if (before.busOccupied || before.activeApple) return "device-preserved";
-        if (!before.enumerationReady()) return "not-ready";
-        boolean powerChanged = false;
-        try {
-            // Re-read immediately before the disruptive write: enumeration may have completed
-            // while the helper was being launched. The kernel offers no atomic test-and-write.
-            State current = port.read();
-            validate(current);
-            if (current.busOccupied || current.activeApple) return "device-preserved";
-            if (!current.enumerationReady()) return "not-ready";
-            powerChanged = true;
-            port.power("off");
-            if (port.read().powered()) throw new IOException("runtime_power_off_readback");
-            port.awaitPowerOff();
-            port.power("on");
-            if (!port.read().ready()) throw new IOException("runtime_readback");
-            return "enumeration-restarted";
-        } catch (Exception failure) {
-            // A revoked lease must still allow the bounded restoration of our power-off.
-            port.beginRollback();
-            try {
-                if (powerChanged) {
-                    port.power("on");
-                    if (!port.read().powered()) throw new IOException("runtime_rollback_readback");
-                }
-            } catch (Exception rollback) { throw new IOException("runtime_rollback_failed", rollback); }
-            throw failure;
-        }
-    }
-
     // H53 sysfs readback is descriptive text, not necessarily the value accepted by writes.
     // Keep exact matches: substring matching could accept a fault message containing "on".
     static boolean isPowered(String value) {
@@ -175,7 +123,10 @@ public final class GeelyUsbRuntimePolicy {
             State host = port.read();
             if (!"0".equals(host.role) || !isHealthy(host.fault)) throw new IOException("host_not_ready");
             if (!host.powered()) { changedPower = true; port.power("on"); }
-            if (!"sdp".equals(host.charging)) { changedCharging = true; port.charging("sdp"); }
+            if (!TARGET_CHARGING_MODE.equals(host.charging)) {
+                changedCharging = true;
+                port.charging(TARGET_CHARGING_MODE);
+            }
             if (!port.read().ready()) throw new IOException("runtime_readback");
             return "prepared";
         } catch (Exception failure) {

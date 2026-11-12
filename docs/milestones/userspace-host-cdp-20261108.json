@@ -1,5 +1,5 @@
 {
-  "status": "user validated installed build; no major issues reported",
+  "status": "stable USB baseline; user confirms other functions normal; CarPlay channel opening and connection establishment remain slow",
   "date": "2026-11-08",
   "source_commit": "3c6cc2930c686e820bf56de86fd9a1556862f7d6",
   "source_branch": "milestone/usb-smooth-userspace-ncm-20261108",
@@ -20,5 +20,11 @@
   "failures": 0,
   "errors": 0,
   "skipped": 3,
-  "validation_limit": "First-attempt success, repeated cold-start/replug, long-run stability and opt-in kernel NIC UP are not fully accepted by this record"
+  "validation_limit": "Stable designation reflects the user-confirmed USB usage scope; it does not mean connection latency is fixed or extend to wireless, other vehicles, optional kernel NCM, or every formal long-run test.",
+  "alias": "A",
+  "status_updated_at": "2026-11-12",
+  "known_issues": [
+    "CarPlay channel opening and connection establishment take too long; optimization incomplete"
+  ],
+  "user_feedback": "当前USB连接方式的稳定版本；其他功能一切正常，CarPlay通道打开及连接建立耗时过长尚未优化完毕。"
 }

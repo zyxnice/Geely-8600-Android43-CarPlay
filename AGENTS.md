@@ -1,5 +1,6 @@
 # 吉利 8600 维护仓库
 
+- 2026-11-12版本称呼：A版本固定指Host＋CDP流畅稳定USB基线，源码3c6cc29、APK c0628c96dede；来自milestone/usb-smooth-userspace-ncm-20261108并已收录main。用户确认其他功能正常，CarPlay通道打开及连接建立耗时过长尚未优化完成。原始c51d09c源码快照、4c21旧包及workspace52均须按各自身份区分，不能仅凭分支名或版本号混用。
 - 本 checkout 的构建、安装说明见 README.md、docs/BUILD.md、docs/INSTALL.md；工作区授权与 OSS 分发规则见 D:/geely/AGENTS.md。
 - 专用包 com.shihab.diplay.repair1.geely8600，API18/C3ALFUS/06.03.08600.H53.00060；构建使用 Gradle wrapper 和 -PgeelyPerformanceStage=B，认证资产必须显式输入。
 - HUD 生命周期参照 shared/src/main/java/com/shilapi/xcertplay/hud/GeelyHudTrialPolicy.kt 与 GeelyHudTrialOutput.kt；保持同一 owner、代次失效及清屏顺序。

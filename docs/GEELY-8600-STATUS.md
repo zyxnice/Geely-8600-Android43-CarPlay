@@ -1,12 +1,32 @@
 # 星越 2019 款 8600 当前状态
 
-更新日期：2026-11-04。本文是当前版本与验收状态入口；旧记录按各自日期和候选理解。
+更新日期：2026-11-12。本文是当前版本与验收状态入口；旧记录按各自日期和候选理解。
 
-## 当前：USB 流畅度里程碑
+## 当前稳定版本：A 版本（2026-11-12）
+
+用户确认：`milestone/usb-smooth-userspace-ncm-20261108` 所属的 USB 流畅版本作为当前 USB 连接方式的稳定基线；**CarPlay 通道打开及连接建立耗时过长，优化尚未完成；其他功能一切正常。** 本结论对应用户当前 USB 实车使用反馈。
+
+| 项目 | 当前说明 |
+| --- | --- |
+| 版本称呼 | **A 版本：用户态 NCM＋Host/CDP 自动准备** |
+| 基线分支 | [milestone/usb-smooth-userspace-ncm-20261108](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/tree/milestone/usb-smooth-userspace-ncm-20261108) |
+| A 版本源码 | [3c6cc29](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/commit/3c6cc2930c686e820bf56de86fd9a1556862f7d6)，已收录于 main |
+| A 版本安装包 | [c0628c96dede](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)；完整身份见[版本记录](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md) |
+| 已知待优化 | CarPlay 通道打开、建立连接等待过长；不能表述为已解决或首次连接必成功 |
+| 其他功能 | 用户确认正常 |
+
+“稳定版本”是当前 USB 使用基线的定位，不将无线、其他车型、可选内核 NCM 或历史独立维护试验纳入此次确认。A 版本固定对应上述源码和 APK，不指 workspace52，也不沿用早期实验包的 A 编号。
+
+### 分支与安装包身份
+
+2026-11-12核对：GitHub里程碑分支的应用代码仍是原始 `c51d09c` 快照；A版本的Host/CDP自动准备整合提交为 `3c6cc29`，已在 `main` 中。本次只更新说明和状态，未把两份源码视作同一版本。需要构建与A包一致的应用代码时，以 `3c6cc29` 为准；原始 `4c21a50c057a` 包继续按历史记录保留。
+
+
+## 历史：2026-11-04 USB 流畅度里程碑
 
 已装车性能候选为 `tls-read-scratch`（SHA-256 前缀 `7ef58d64cb92`），用户认可大部分滑动明显改善并要求归档发布。收录音频、USB、TLS 缓冲复用和帧时序诊断；仍偶发长停顿，重启手机后未消失。发布原始 APK，身份、下载、验证及限制见[里程碑记录](USB-SMOOTHNESS-MILESTONE-20261104.md)。下列旧安装身份及“本次未发布”仅描述各自历史任务。
 
-## 当前补充：讯飞仅按键候选，验收未通过
+## 历史独立维护：讯飞仅按键候选，验收未通过
 
 原厂讯飞唤醒开关全部关闭时仍有后台录音。本轮对固定H53原厂ODEX的7个唤醒启动/恢复入口作定长限制，保留原APK、签名、按键主动识别、停止与取消通路；这是独立维护补丁，不包含在DiPlay APK中，也不属于导航兼容APK的功能。
 

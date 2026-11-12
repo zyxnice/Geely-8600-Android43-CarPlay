@@ -1,5 +1,26 @@
 # 用户态 NCM 与 APP Host/CDP：2026-11-08 实车确认版本
 
+## 当前稳定版本：A 版本（2026-11-12）
+
+用户确认：`milestone/usb-smooth-userspace-ncm-20261108` 所属的 USB 流畅版本作为当前 USB 连接方式的稳定基线；**CarPlay 通道打开及连接建立耗时过长，优化尚未完成；其他功能一切正常。** 本结论对应用户当前 USB 实车使用反馈。
+
+| 项目 | 当前说明 |
+| --- | --- |
+| 版本称呼 | **A 版本：用户态 NCM＋Host/CDP 自动准备** |
+| 基线分支 | [milestone/usb-smooth-userspace-ncm-20261108](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/tree/milestone/usb-smooth-userspace-ncm-20261108) |
+| A 版本源码 | [3c6cc29](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/commit/3c6cc2930c686e820bf56de86fd9a1556862f7d6)，已收录于 main |
+| A 版本安装包 | [c0628c96dede](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)；完整身份见[版本记录](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md) |
+| 已知待优化 | CarPlay 通道打开、建立连接等待过长；不能表述为已解决或首次连接必成功 |
+| 其他功能 | 用户确认正常 |
+
+“稳定版本”是当前 USB 使用基线的定位，不将无线、其他车型、可选内核 NCM 或历史独立维护试验纳入此次确认。A 版本固定对应上述源码和 APK，不指 workspace52，也不沿用早期实验包的 A 编号。
+
+### 分支与安装包身份
+
+2026-11-12核对：GitHub里程碑分支的应用代码仍是原始 `c51d09c` 快照；A版本的Host/CDP自动准备整合提交为 `3c6cc29`，已在 `main` 中。本次只更新说明和状态，未把两份源码视作同一版本。需要构建与A包一致的应用代码时，以 `3c6cc29` 为准；原始 `4c21a50c057a` 包继续按历史记录保留。
+
+## 2026-11-08构建与初次确认记录
+
 本页记录 main 收录的实车版本。用户在安装后明确反馈：“这个版本我验证过了，没有什么太大问题”，并要求合入 main 推送。
 该反馈按用户的实际验证原意保留，不等于所有冷启动、重复拔插或长期稳定性项目已逐项验收。
 
@@ -42,4 +63,4 @@ APK、认证材料、签名私钥和原始现场日志不提交Git。恢复或�
 现场日志存在attempt=2，本版不承诺首次连接必成功。首次成功率、完整重启/重复拔插、长时间音画触控稳定性仍按原清单验证。
 没有从短时帧率或触控诊断推导主观体验百分比，也没有宣称内核网卡UP已实车通过。
 此前 `4c21a50c057a` 的原始流畅里程碑及其JSON不修改，见[原记录](USB-SMOOTHNESS-MILESTONE-20261108.md)。
-本次按用户指令只合入并推送main，不新增Release、标签或车机操作。安装与回退规则沿用 [INSTALL.md](INSTALL.md)。
+2026-11-08按当次用户指令只合入并推送main，不新增Release、标签或车机操作。安装与回退规则沿用 [INSTALL.md](INSTALL.md)。

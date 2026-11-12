@@ -1,6 +1,6 @@
 # DiPlay · 吉利星越 2019 款 8600 车机专用
 
-> **本分支：2026-11-08 用户态 NCM 画面流畅里程碑。** 用户已实车确认画面和触控较流畅，保持1920×720和HOST＋CDP；连接仍可能自动重试。对应实装包为`4c21a50c057a`，恢复与后续比较以[本分支版本记录](docs/USB-SMOOTHNESS-MILESTONE-20261108.md)的完整SHA-256为准。以下正文保留此前主线背景，旧版“当前状态”不覆盖本分支记录。
+> **当前 USB 稳定 A 版本（更新于2026-11-12）：用户态 NCM＋Host/CDP 自动准备。** 基线为 `milestone/usb-smooth-userspace-ncm-20261108`，A包源码 `3c6cc29`、APK `c0628c96dede`。用户确认其他功能一切正常；**CarPlay 通道打开及连接建立耗时过长仍未优化完毕。** [版本身份、下载与状态](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md)。
 
 
 本项目仅面向**吉利星越 2019 款、8600 版本原厂车机**，维护 Android 4.3 / API18 环境下的 CarPlay 适配，当前重点为 USB 连接、音视频播放、触控响应、连接恢复与 HUD 导航。
@@ -21,7 +21,26 @@
 
 上述硬件与固件来自已有现场记录，不代表所有标为 8600 的固件均已验证。请先核对车型、年份、车机和完整固件号。
 
-## 当前状态（更新于 2026-11-04）
+## 当前稳定版本：A 版本（2026-11-12）
+
+用户确认：`milestone/usb-smooth-userspace-ncm-20261108` 所属的 USB 流畅版本作为当前 USB 连接方式的稳定基线；**CarPlay 通道打开及连接建立耗时过长，优化尚未完成；其他功能一切正常。** 本结论对应用户当前 USB 实车使用反馈。
+
+| 项目 | 当前说明 |
+| --- | --- |
+| 版本称呼 | **A 版本：用户态 NCM＋Host/CDP 自动准备** |
+| 基线分支 | [milestone/usb-smooth-userspace-ncm-20261108](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/tree/milestone/usb-smooth-userspace-ncm-20261108) |
+| A 版本源码 | [3c6cc29](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/commit/3c6cc2930c686e820bf56de86fd9a1556862f7d6)，已收录于 main |
+| A 版本安装包 | [c0628c96dede](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)；完整身份见[版本记录](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md) |
+| 已知待优化 | CarPlay 通道打开、建立连接等待过长；不能表述为已解决或首次连接必成功 |
+| 其他功能 | 用户确认正常 |
+
+“稳定版本”是当前 USB 使用基线的定位，不将无线、其他车型、可选内核 NCM 或历史独立维护试验纳入此次确认。A 版本固定对应上述源码和 APK，不指 workspace52，也不沿用早期实验包的 A 编号。
+
+### 分支与安装包身份
+
+2026-11-12核对：GitHub里程碑分支的应用代码仍是原始 `c51d09c` 快照；A版本的Host/CDP自动准备整合提交为 `3c6cc29`，已在 `main` 中。本次只更新说明和状态，未把两份源码视作同一版本。需要构建与A包一致的应用代码时，以 `3c6cc29` 为准；原始 `4c21a50c057a` 包继续按历史记录保留。
+
+## 历史状态（2026-11-04）
 
 | 项目 | 最新结论 |
 | --- | --- |
@@ -41,15 +60,15 @@
 
 11月1日至2日的 trial2、音频恢复和各轮排查记录保留在状态文档的历史部分，不代表已撤回独占包通过实车验收。无线连接及其他车型能力仍未验收。
 
-## 下一步验证
+## 后续重点
 
-1. **保持当前无原车高德的使用场景**：观察 HUD、距离刷新和导航声音，不要求安装高德或继续独占测试。
-2. **补齐 USB 与音画稳定性**：按既有清单验证重复启动、重连、音乐／导航声音、触控与长测，继续处理 VPN 重启授权问题。
-3. **无线连接保留为后续规划**：当前没有已验证方案或上线时间承诺。
+1. 继续优化 A 版本 CarPlay 通道打开与连接建立耗时，缩短进入画面的等待。
+2. 后续优化以当前稳定 USB 基线为参照，回归用户已确认正常的其他功能。
+3. 无线及其他车型不属于本次稳定版本范围。
 
 ## 下载、安装与反馈
 
-当前 [USB 流畅度里程碑](docs/USB-SMOOTHNESS-MILESTONE-20261104.md)发布已装车的原始 APK；完整版本见[本仓库 Releases](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases)。[HUD 独占测试包](docs/HUD-EXCLUSIVE-20261103.md)已撤回。里程碑仍有偶发长停顿，属于预发布；原上游 APK、H52 的 P21/P22 包以及其他车型的包不是星越 8600 的推荐下载。
+当前 USB 稳定版本使用 [A 版本 APK](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)，完整 SHA-256 与安装身份见[版本记录](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md)。CarPlay 连接建立较慢仍在优化，其他功能按用户反馈正常。此前安装包和[11月4日记录](docs/USB-SMOOTHNESS-MILESTONE-20261104.md)仅用于历史追溯；[HUD独占包](docs/HUD-EXCLUSIVE-20261103.md)仍已撤回。
 
 公开源码树已移除旧 H52/P21 安装包，保留其历史说明与源码快照供追溯；不改写 Git 历史。
 

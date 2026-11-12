@@ -24,6 +24,13 @@
 本页记录 main 收录的实车版本。用户在安装后明确反馈：“这个版本我验证过了，没有什么太大问题”，并要求合入 main 推送。
 该反馈按用户的实际验证原意保留，不等于所有冷启动、重复拔插或长期稳定性项目已逐项验收。
 
+## GitHub发布（2026-11-12）
+
+- [A版本Release](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a) · [直接下载APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.12-usb-stable-a/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)。
+- 标签：`v2026.11.12-usb-stable-a`。附件为下述已验证的原始A包，完整SHA-256保持不变；本次未重新构建或修改APK。
+- 标签在A版本应用代码之上包含最新说明和状态，实际APK构建源码仍为`3c6cc29`。
+- 下一阶段转向[WiFi连接优化](WIFI-CONNECTION-STATUS.md)，目前受AAC解码问题阻塞；USB通道打开和连接建立慢的问题继续保留。
+
 ## 安装包与源码
 
 - 源码：`3c6cc2930c686e820bf56de86fd9a1556862f7d6`；来自 `milestone/usb-smooth-userspace-ncm-20261108`。

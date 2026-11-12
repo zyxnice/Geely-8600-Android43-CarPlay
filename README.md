@@ -60,13 +60,15 @@
 
 11月1日至2日的 trial2、音频恢复和各轮排查记录保留在状态文档的历史部分，不代表已撤回独占包通过实车验收。无线连接及其他车型能力仍未验收。
 
-## 后续重点
+## 后续重点：WiFi 连接
 
-1. 继续优化 A 版本 CarPlay 通道打开与连接建立耗时，缩短进入画面的等待。
-2. 后续优化以当前稳定 USB 基线为参照，回归用户已确认正常的其他功能。
-3. 无线及其他车型不属于本次稳定版本范围。
+下一阶段优化 WiFi 连接版本。**目前 WiFi 连接受 AAC 解码问题阻塞，尚未解决。** 该状态由用户于2026-11-12确认，见 [WiFi连接状态](docs/WIFI-CONNECTION-STATUS.md)。
+
+A版本继续作为当前USB稳定基线；其CarPlay通道打开与连接建立耗时过长仍是保留问题。后续WiFi优化需单独验证，并回归已确认正常的USB功能。
 
 ## 下载、安装与反馈
+
+**[GitHub Release：A版本 · 2026-11-12](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a)** · [下载A版本APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.12-usb-stable-a/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)。标签：`v2026.11.12-usb-stable-a`；应用代码对应已验证的`3c6cc29`，标签另包含最新状态文档。
 
 当前 USB 稳定版本使用 [A 版本 APK](https://meice-test.oss-cn-shanghai.aliyuncs.com/geely/apk/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)，完整 SHA-256 与安装身份见[版本记录](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md)。CarPlay 连接建立较慢仍在优化，其他功能按用户反馈正常。此前安装包和[11月4日记录](docs/USB-SMOOTHNESS-MILESTONE-20261104.md)仅用于历史追溯；[HUD独占包](docs/HUD-EXCLUSIVE-20261103.md)仍已撤回。
 

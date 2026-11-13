@@ -1,8 +1,8 @@
 # DiPlay · 吉利星越 2019 款 8600 车机专用
 
-> **当前 USB 稳定 A 版本（更新于2026-11-12）：用户态 NCM＋Host/CDP 自动准备。** 基线为 `milestone/usb-smooth-userspace-ncm-20261108`，A包源码 `3c6cc29`、APK `c0628c96dede`。用户确认其他功能一切正常；**CarPlay 通道打开及连接建立耗时过长仍未优化完毕。** [版本身份、下载与状态](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md)。
+> **当前版本：1.0 正式版（2026-11-13）。** 用户确认 USB 与 Wi-Fi 两种连接方式的问题均已解决。后续重点是同时优化两种模式的画面、滑动和触控流畅度。[正式版下载](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v1.0.0) · [版本身份与后续重点](docs/RELEASE-1.0-20261113.md)。
 
-> **2026-11-13：Wi-Fi 蓝牙媒体隔离修复已合入 main，精简测试 APK 已发布。** 只保留所选手机 A2DP 隔离及正常退出恢复，其他 Wi-Fi 排查改动已撤回；本包尚待实车回归，USB A 仍为稳定版。[下载测试版与安装条件](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.13-wifi-bluetooth-only)。
+> 1.0 沿用当前 APK 内容与签名，应用代码 `da26e77`、APK `fe2daa9ada75`。内部版本字段保留 `0.2.10-H53-USB3-B`；覆盖安装需保留认证数据，Wi-Fi 使用手动开启原车热点的现有流程。
 
 
 本项目仅面向**吉利星越 2019 款、8600 版本原厂车机**，维护 Android 4.3 / API18 环境下的 CarPlay 适配，当前重点为 USB 连接、音视频播放、触控响应、连接恢复与 HUD 导航。
@@ -23,7 +23,9 @@
 
 上述硬件与固件来自已有现场记录，不代表所有标为 8600 的固件均已验证。请先核对车型、年份、车机和完整固件号。
 
-## 当前稳定版本：A 版本（2026-11-12）
+## 历史 USB A 基线（2026-11-12）
+
+以下保留当时的 USB 单模式验收与版本身份。当前正式版本与连接状态以顶部 1.0 记录为准。
 
 用户确认：`milestone/usb-smooth-userspace-ncm-20261108` 所属的 USB 流畅版本作为当前 USB 连接方式的稳定基线；**CarPlay 通道打开及连接建立耗时过长，优化尚未完成；其他功能一切正常。** 本结论对应用户当前 USB 实车使用反馈。
 
@@ -62,15 +64,17 @@
 
 11月1日至2日的 trial2、音频恢复和各轮排查记录保留在状态文档的历史部分，不代表已撤回独占包通过实车验收。无线连接及其他车型能力仍未验收。
 
-## 后续重点：WiFi 连接
+## 后续重点：USB 与 Wi-Fi 流畅度
 
-2026-11-13 实车对照确认原厂蓝牙 A2DP 连接参与 WiFi 音乐无声；自动隔离试验包的音乐和暂停重播已获用户确认。本次仅保留蓝牙媒体隔离修复，撤回其他排查调整，精简后的组合尚待实车回归，见 [WiFi连接状态](docs/WIFI-CONNECTION-STATUS.md)。
+用户已确认 USB 与 Wi-Fi 连接问题均已解决。下一阶段同时优化两种模式的画面连续性、滑动与触控响应；分别以相同场景采样、定位瓶颈并回归连接和音乐功能，见 [1.0 与后续重点](docs/RELEASE-1.0-20261113.md)。
 
-A版本继续作为当前USB稳定基线；其CarPlay通道打开与连接建立耗时过长仍是保留问题。后续WiFi优化需单独验证，并回归已确认正常的USB功能。
+1.0 作为后续优化与回退基线。历史 A 版和 Wi-Fi 试验记录保留，流畅度优化不以重新打开已确认解决的连接问题为默认前提。
 
-[Wi-Fi 蓝牙隔离精简 APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.13-wifi-bluetooth-only/DiPlay-8600-H53-WiFi-BluetoothOnly-da26e77-20261113-fe2daa9ada75.apk)（源码 `da26e77`、SHA-256 `fe2daa9ada750f687c24894c1a323673ad0b375f6b692ecddee5772c41e06abb`）。需保留已有认证数据，手动开启原车热点并选择无线连接；本版不含自动热点及 AAC/缓冲试验改动。
+[下载 1.0 正式版 APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v1.0.0/DiPlay-8600-v1.0.0-20261113-fe2daa9ada75.apk)（源码 `da26e77`、SHA-256 `fe2daa9ada750f687c24894c1a323673ad0b375f6b692ecddee5772c41e06abb`）。需保留已有认证数据，手动开启原车热点并选择无线连接。
 
 ## 下载、安装与反馈
+
+**[当前正式版本：1.0](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v1.0.0)**，支持已确认解决连接问题的 USB 与 Wi-Fi 两种模式。下方 A 版本入口为历史归档。
 
 **[GitHub Release：A版本 · 2026-11-12](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a)** · [下载A版本APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.12-usb-stable-a/DiPlay-8600-smooth-host-cdp-3c6cc29-20261108-c0628c96dede.apk)。标签：`v2026.11.12-usb-stable-a`；应用代码对应已验证的`3c6cc29`，标签另包含最新状态文档。
 

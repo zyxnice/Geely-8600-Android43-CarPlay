@@ -1,6 +1,7 @@
 # 吉利 8600 维护仓库
 
-- 2026-11-13 Wi-Fi音乐：同机A/B/A对照确认原厂A2DP连接参与无声；仅保留蓝牙媒体隔离修复da26e77并合入main，撤回其他未提交Wi-Fi试验。精简APK作为Pre-release发布，未装车回归；不能沿用此前混合试验包的验收代替。流畅度不在此次范围；状态与安装前提见docs/WIFI-CONNECTION-STATUS.md。USB稳定A版保持独立基线。
+- 2026-11-13最新用户验收：USB和Wi-Fi连接问题均已解决，当前版本定为1.0正式版（v1.0.0），应用代码da26e77、APK fe2daa9ada75。后续重点同时优化USB与Wi-Fi模式的画面、滑动和触控流畅度，保持连接及音乐功能。正式定位依据用户本次确认，不扩写未逐项测试的长期/异常场景；见docs/RELEASE-1.0-20261113.md。
+- 蓝牙隔离修复仅作用于匹配H53的无线会话；此前AAC、缓冲、自动热点等试验已撤回。1.0沿用当前APK内容与签名，内部版本字段仍为0.2.10-H53-USB3-B；覆盖安装保留认证数据，Wi-Fi热点仍需手动开启。历史USB A与试验包身份分别保留。
 - 2026-11-12版本称呼：A版本固定指Host＋CDP流畅稳定USB基线，源码3c6cc29、APK c0628c96dede；来自milestone/usb-smooth-userspace-ncm-20261108并已收录main。用户确认其他功能正常，CarPlay通道打开及连接建立耗时过长尚未优化完成。原始c51d09c源码快照、4c21旧包及workspace52均须按各自身份区分，不能仅凭分支名或版本号混用。
 - 本 checkout 的构建、安装说明见 README.md、docs/BUILD.md、docs/INSTALL.md；工作区授权与 OSS 分发规则见 D:/geely/AGENTS.md。
 - 专用包 com.shihab.diplay.repair1.geely8600，API18/C3ALFUS/06.03.08600.H53.00060；构建使用 Gradle wrapper 和 -PgeelyPerformanceStage=B，认证资产必须显式输入。

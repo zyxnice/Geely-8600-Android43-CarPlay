@@ -19,7 +19,7 @@
 
 ## 下一阶段：WiFi 连接优化
 
-用户于2026-11-12指定下一阶段优化WiFi连接版本；**当前阻塞为AAC解码问题，尚未解决。** 此状态不改变USB稳定A版本的定位，也不表示WiFi已经达到稳定可用状态。具体AAC编码配置、失败日志、复现步骤与修复验证结论尚待专项排查补充，见[WiFi连接状态](WIFI-CONNECTION-STATUS.md)。
+2026-11-13 实车 A/B/A 对照确认原厂蓝牙 A2DP 连接参与 WiFi 音乐无声，自动隔离试验包的音乐和暂停重播已由用户确认。本次按用户要求仅保留蓝牙隔离，撤回其他排查调整；精简后的组合尚待实车回归，流畅度不属于本次范围。USB 稳定 A 版定位不变，见[WiFi连接状态](WIFI-CONNECTION-STATUS.md)。
 
 A版本安装包现通过[GitHub Release](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a)分发，标签为`v2026.11.12-usb-stable-a`；CarPlay通道打开及连接建立慢仍未优化完成。
 

@@ -256,6 +256,7 @@ class CarPlayController(
     @Volatile private var bonjour: CarPlayBonjour? = null
     @Volatile private var bluetoothSocket: BluetoothSocket? = null
     @Volatile private var bluetoothStream: BlockingDuplexByteStream? = null
+    @Volatile private var wirelessMediaGuard: com.shilapi.xcertplay.media.GeelyWifiMediaGuard? = null
     @Volatile private var wirelessTunnelChannel: Iap2Session? = null
     @Volatile private var wirelessIdentification: Iap2IdentificationConfig? = null
     @Volatile private var wirelessAirPlayEndpoint: Iap2WirelessCarPlayEndpoint? = null
@@ -1046,6 +1047,14 @@ class CarPlayController(
                     ?: throw IOException("Choose an iPhone from the H52 factory paired list first")
             }
             val targetAddress = vendorDevice?.address ?: device!!.address
+            if (com.shilapi.xcertplay.media.GeelyWifiMediaGuard.supportsVehicle(
+                    Build.VERSION.SDK_INT, Build.BOARD, Build.DISPLAY,
+                )) {
+                // Only the selected wireless phone is isolated; USB never enters this path.
+                wirelessMediaGuard = com.shilapi.xcertplay.media.GeelyWifiMediaGuard(targetAddress) {
+                    debugLog("Wi-Fi media: $it")
+                }
+            }
             val hostBluetoothMac = vendorBackend?.localAddress() ?: accessoryBluetoothMac(adapter!!)
             debugLog("wireless Bluetooth backend=${if (vendorBackend != null) "H52-ANW" else "Android"}")
             val wirelessAirPlayConfig = airPlayConfig.copy(
@@ -1322,12 +1331,14 @@ class CarPlayController(
             override fun onSessionActive(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
                 wirelessConnectionProof.activate(generation, session)
+                wirelessMediaGuard?.activate(session)
                 sessionListener.onSessionActive(session)
             }
 
             override fun onSessionEnded(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
                 wirelessConnectionProof.end(generation, session)
+                wirelessMediaGuard?.end(session)
                 sessionListener.onSessionEnded(session)
             }
 
@@ -2078,6 +2089,8 @@ class CarPlayController(
     }
 
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+        val mediaGuard = wirelessMediaGuard
+        wirelessMediaGuard = null
         wirelessConnectionProof.clear()
         media.setIapTunnelHandler(null)
         val activeTunnel = wirelessTunnelChannel
@@ -2100,6 +2113,7 @@ class CarPlayController(
         wirelessActiveReported.set(false)
 
         if (service != null) closeBestEffort("AirPlay service") { service.detach() }
+        if (mediaGuard != null) closeBestEffort("wireless Bluetooth media restoration") { mediaGuard.close() }
     }
 
     private fun isBluetoothDeviceConnected(device: BluetoothDevice): Boolean = try {

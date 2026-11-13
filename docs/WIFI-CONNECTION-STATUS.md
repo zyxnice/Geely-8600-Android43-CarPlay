@@ -1,21 +1,51 @@
-# WiFi连接版本状态
+# Wi-Fi 音乐：隔离原厂蓝牙媒体连接
 
-更新日期：2026-11-12。
+更新日期：2026-11-13。
 
-## 当前状态与下一阶段
+## 问题与实车证据
 
-用户指定下一阶段优化WiFi连接版本。**当前受AAC解码问题阻塞，问题尚未解决。**
+Wi-Fi CarPlay 音乐出现短暂出声后无声，部分场景进度仍推进。此前怀疑 AAC，
+但无声窗口中存在持续非零 PCM 和 AudioTrack 播放头推进；它们不能单独证明扬声器出声。
+同机 A/B/A 对照得到：原厂 A2DP 保持连接时无声；仅断开所选手机 A2DP 后有声；
+恢复该 A2DP 后再次无声。HFP 免提连接全程保留，未操作音频焦点。
 
-本条依据用户的现场反馈记录；目前未在本次发布任务中重新复现或修改解码实现。具体AAC编码配置、解码器路径、错误日志及触发条件尚待专项排查确认，不预先认定硬件解码能力、采样率或某个库是根因。
+加入自动隔离的 BTMEDIA6 LOG、NOLOG 两个试验包均由用户确认音乐持续正常、暂停重播正常。
+正常退出的恢复请求与原厂 A2DP 连接恢复也已核验。
+这些试验包同时包含其他排查改动，**不等于本次精简提交已完成实车回归**。
 
-## 后续工作
+## 本次保留的修复
 
-1. 收集WiFi连接时AAC解码失败的日志和可重复触发步骤，定位实际失败环节。
-2. 针对确认的问题实施修复，验证解码和音频播放，再检查WiFi连接及音画触控表现。
-3. 独立回归USB稳定A版本已正常的功能；验证完成前不把WiFi标记为稳定版本。
+- 仅在无线连接路径、API18、C3ALFUS、完整固件 `06.03.08600.H53.00060` 生效。
+- 使用无线流程实际选定的手机地址，在 AirPlay 会话激活后临时断开其原厂 A2DP。
+- 专用工作线程每秒检查自动重连；正常会话结束或无线栈退出时恢复本次释放的连接。
+- 旧会话结束不干扰新会话；用户切换到另一部手机时不抢回连接；未主动断开则不主动恢复。
+- 仅使用 `NeuC3AlfusBluetooth` 的媒体连接方法，核对 Binder 描述符；不改蓝牙总开关、
+  HFP、配对、连接优先级和音频焦点。失败沿用关键节点诊断，不增加逐包日志。
 
-## 与USB A版本的关系
+实现参照 `GeelyWifiMediaGuard.kt`、`WirelessMediaLease.kt`，生命周期接入
+`CarPlayController.startWireless()`、无线 session listener 与 `closeWirelessStack()`。
+原 USB `H52WiredAudioGuard` 保持不变。
 
-USB稳定A版为用户态NCM＋Host/CDP自动准备，APK标识`c0628c96dede`、应用源码`3c6cc29`。用户确认该USB版本其他功能正常，但CarPlay通道打开及连接建立耗时过长仍未优化完毕。
+## 本次撤回与验证边界
 
-[下载USB A版本](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a) · [USB版本记录](USB-HOST-CDP-ACCEPTANCE-20261108.md) · [项目状态](GEELY-8600-STATUS.md)
+按用户要求，撤回本次 Wi-Fi 工作树中其他未提交改动，包括 AAC 解码调整、音频缓冲、
+额外诊断/NOLOG 构建、自动热点及默认无线启动。只保留蓝牙隔离及其测试、说明。
+无线入口和热点配置恢复主线原有行为；蓝牙修复不再依赖试验热点开关。
+流畅度优化不属于本次范围。旧试验 APK 不代表这份精简源码，不作为本提交发布产物。
+
+单测覆盖释放/恢复、断开拒绝、读取失败、自动重连、会话替换、其他手机、最终恢复重试，
+以及固件边界。构建检查与实车验收分开记录；精简后的组合仍需单独装车回归。
+进程被系统强杀可能跳过退出回调，此时可从原车蓝牙页面恢复媒体连接。
+
+本次精简源码已完成 `:shared:testDebugUnitTest :common:testDebugUnitTest`：959 项通过、
+3 项既有跳过，无失败；11 项蓝牙隔离与固件边界用例通过。`:mobile:lintDebug` 无错误
+（20 条警告），`:mobile:assembleGeelyUsb :mobile:assembleDebug -PgeelyPerformanceStage=B`
+构建通过。没有安装、上传或发布新 APK，也没有以历史试验包验收替代本次精简版本实车验证。
+
+## 与 USB A 版本的关系
+
+USB 稳定 A 版为用户态 NCM＋Host/CDP 自动准备，APK 标识 `c0628c96dede`、应用源码 `3c6cc29`。
+用户确认其他功能正常，连接建立耗时仍是独立事项。本次不修改 USB 和音视频公共实现。
+
+[USB A 版本](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a)
+· [USB 版本记录](USB-HOST-CDP-ACCEPTANCE-20261108.md)

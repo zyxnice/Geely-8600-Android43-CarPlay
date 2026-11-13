@@ -1,6 +1,6 @@
 # 星越 2019 款 8600 当前状态
 
-更新日期：2026-11-12。本文是当前版本与验收状态入口；旧记录按各自日期和候选理解。
+更新日期：2026-11-13。本文是当前版本与验收状态入口；旧记录按各自日期和候选理解。
 
 ## 当前稳定版本：A 版本（2026-11-12）
 
@@ -17,9 +17,11 @@
 
 “稳定版本”是当前 USB 使用基线的定位，不将无线、其他车型、可选内核 NCM 或历史独立维护试验纳入此次确认。A 版本固定对应上述源码和 APK，不指 workspace52，也不沿用早期实验包的 A 编号。
 
-## 下一阶段：WiFi 连接优化
+## Wi-Fi 蓝牙隔离精简测试版（2026-11-13）
 
 2026-11-13 实车 A/B/A 对照确认原厂蓝牙 A2DP 连接参与 WiFi 音乐无声，自动隔离试验包的音乐和暂停重播已由用户确认。本次按用户要求仅保留蓝牙隔离，撤回其他排查调整；精简后的组合尚待实车回归，流畅度不属于本次范围。USB 稳定 A 版定位不变，见[WiFi连接状态](WIFI-CONNECTION-STATUS.md)。
+
+源码 `da26e77` 已合入 main；[GitHub 测试版发布页](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.13-wifi-bluetooth-only)提供 APK 和 SHA256SUMS。新 APK 标识 `fe2daa9ada75`，不同于此前 BTMEDIA6 LOG/NOLOG 混合试验包。需保留认证数据、手动开启热点并选择无线连接；本次未安装到车机。
 
 A版本安装包现通过[GitHub Release](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.12-usb-stable-a)分发，标签为`v2026.11.12-usb-stable-a`；CarPlay通道打开及连接建立慢仍未优化完成。
 

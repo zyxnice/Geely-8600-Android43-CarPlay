@@ -40,7 +40,31 @@ Wi-Fi CarPlay 音乐出现短暂出声后无声，部分场景进度仍推进。
 本次精简源码已完成 `:shared:testDebugUnitTest :common:testDebugUnitTest`：959 项通过、
 3 项既有跳过，无失败；11 项蓝牙隔离与固件边界用例通过。`:mobile:lintDebug` 无错误
 （20 条警告），`:mobile:assembleGeelyUsb :mobile:assembleDebug -PgeelyPerformanceStage=B`
-构建通过。没有安装、上传或发布新 APK，也没有以历史试验包验收替代本次精简版本实车验证。
+构建通过。随后按用户要求合入主线并发布以下测试 APK，未安装到车机；
+没有以历史试验包验收替代本次精简版本实车验证。
+
+## GitHub 测试版与安装条件
+
+[发布页](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.13-wifi-bluetooth-only)
+· [下载 APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.13-wifi-bluetooth-only/DiPlay-8600-H53-WiFi-BluetoothOnly-da26e77-20261113-fe2daa9ada75.apk)
+· [SHA256SUMS](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.13-wifi-bluetooth-only/SHA256SUMS.txt)
+
+| 项目 | 身份 |
+| --- | --- |
+| 应用源码与标签目标 | `da26e7788992044d4345ddd23206affd0f44ca47`，已合入 main |
+| 标签 | `v2026.11.13-wifi-bluetooth-only`，Pre-release |
+| APK 大小 | 5,591,858 字节 |
+| SHA-256 | `fe2daa9ada750f687c24894c1a323673ad0b375f6b692ecddee5772c41e06abb` |
+| 包名 | `com.shihab.diplay.repair1.geely8600` |
+| 版本字段 | `0.2.10-H53-USB3-B` / versionCode 29，沿用主线变体命名 |
+| 签名 SHA-256 | `f2ea4c3ab5186fc4aa783c8f09c5a52a32f9fda8c4537283ca8d495e3f6c6d79` |
+
+附件完成 v1 签名、API18、ARMv7、单 DEX 与内容检查。包内包含蓝牙隔离实现，
+不包含已撤回的 AAC 专项诊断、缓冲试验或自动热点入口，也不携带认证资产。
+GitHub APK 与校验文件均已匿名完整下载读回，大小、内容和 SHA-256 与本地一致。
+仅适用于已有认证身份的覆盖安装，保留应用数据，不卸载或清除数据。
+测试前在原车设置手动开启热点，在 DiPlay 原有入口选择无线、车机热点及已配对手机，
+核对热点名称和密码。本次不自动修改这些设置，不替换 USB A 稳定版。
 
 ## 与 USB A 版本的关系
 

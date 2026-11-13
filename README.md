@@ -2,6 +2,8 @@
 
 > **当前 USB 稳定 A 版本（更新于2026-11-12）：用户态 NCM＋Host/CDP 自动准备。** 基线为 `milestone/usb-smooth-userspace-ncm-20261108`，A包源码 `3c6cc29`、APK `c0628c96dede`。用户确认其他功能一切正常；**CarPlay 通道打开及连接建立耗时过长仍未优化完毕。** [版本身份、下载与状态](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/main/docs/USB-HOST-CDP-ACCEPTANCE-20261108.md)。
 
+> **2026-11-13：Wi-Fi 蓝牙媒体隔离修复已合入 main，精简测试 APK 已发布。** 只保留所选手机 A2DP 隔离及正常退出恢复，其他 Wi-Fi 排查改动已撤回；本包尚待实车回归，USB A 仍为稳定版。[下载测试版与安装条件](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v2026.11.13-wifi-bluetooth-only)。
+
 
 本项目仅面向**吉利星越 2019 款、8600 版本原厂车机**，维护 Android 4.3 / API18 环境下的 CarPlay 适配，当前重点为 USB 连接、音视频播放、触控响应、连接恢复与 HUD 导航。
 
@@ -65,6 +67,8 @@
 2026-11-13 实车对照确认原厂蓝牙 A2DP 连接参与 WiFi 音乐无声；自动隔离试验包的音乐和暂停重播已获用户确认。本次仅保留蓝牙媒体隔离修复，撤回其他排查调整，精简后的组合尚待实车回归，见 [WiFi连接状态](docs/WIFI-CONNECTION-STATUS.md)。
 
 A版本继续作为当前USB稳定基线；其CarPlay通道打开与连接建立耗时过长仍是保留问题。后续WiFi优化需单独验证，并回归已确认正常的USB功能。
+
+[Wi-Fi 蓝牙隔离精简 APK](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/download/v2026.11.13-wifi-bluetooth-only/DiPlay-8600-H53-WiFi-BluetoothOnly-da26e77-20261113-fe2daa9ada75.apk)（源码 `da26e77`、SHA-256 `fe2daa9ada750f687c24894c1a323673ad0b375f6b692ecddee5772c41e06abb`）。需保留已有认证数据，手动开启原车热点并选择无线连接；本版不含自动热点及 AAC/缓冲试验改动。
 
 ## 下载、安装与反馈
 

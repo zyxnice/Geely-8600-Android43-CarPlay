@@ -2,6 +2,7 @@ package com.shilapi.xcertplay.media
 
 import com.shilapi.xcertplay.airplay.VideoCodec
 import java.io.ByteArrayOutputStream
+import java.nio.ByteBuffer
 
 /**
  * Pure byte helpers that convert the CarPlay screen/audio payloads into the
@@ -147,6 +148,37 @@ object MediaCodecSupport {
         header[5] = (((frameLength and 0x7) shl 5) or 0x1f).toByte()
         header[6] = 0xfc.toByte()
         return header + accessUnit
+    }
+
+    /**
+     * Writes a raw AAC-LC access unit directly into a dequeued codec input buffer.
+     * The Wi-Fi renderer passes its existing RTP array and payload range, avoiding the
+     * intermediate AU, header and concatenated frame arrays. Returns bytes written, or
+     * zero for an invalid range/ADTS length or insufficient space; rejection is atomic.
+     */
+    internal fun writeAdtsFrame(
+        target: ByteBuffer,
+        source: ByteArray,
+        offset: Int,
+        length: Int,
+        sampleRate: Int,
+        channels: Int,
+    ): Int {
+        // ADTS stores the entire frame size in 13 bits, including the seven-byte header.
+        if (offset < 0 || length <= 0 || length > 0x1fff - 7 ||
+            offset > source.size || length > source.size - offset || target.remaining() < length + 7) return 0
+        val frequencyIndex = aacFrequencyIndex(sampleRate)
+        val channelConfig = channels.coerceIn(1, 7)
+        val frameLength = length + 7
+        target.put(0xff.toByte())
+        target.put(0xf1.toByte())
+        target.put(((1 shl 6) or (frequencyIndex shl 2) or (channelConfig ushr 2)).toByte())
+        target.put((((channelConfig and 0x3) shl 6) or (frameLength ushr 11)).toByte())
+        target.put(((frameLength ushr 3) and 0xff).toByte())
+        target.put((((frameLength and 0x7) shl 5) or 0x1f).toByte())
+        target.put(0xfc.toByte())
+        target.put(source, offset, length)
+        return frameLength
     }
 
     /** Extracts one RFC 3640 AAC access unit from an RTP payload. */

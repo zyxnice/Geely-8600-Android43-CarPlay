@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.media
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
+
 /** Worker-owned timings. Output age ends at dequeue, never at physical display presentation. */
 internal class VideoPipelineStats(
     private val report: (String) -> Unit,
@@ -21,6 +23,7 @@ internal class VideoPipelineStats(
     private var lastSubmitNs: Long? = null
 
     fun input(presentationTimeUs: Long, receivedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
         receivedByPts[presentationTimeUs] = receivedNs
         if (receivedByPts.size > 128) {
             val iterator = receivedByPts.entries.iterator()
@@ -31,6 +34,7 @@ internal class VideoPipelineStats(
 
     /** Successful release to Surface, not physical presentation or end-to-end touch latency. */
     fun released(presentationTimeUs: Long, render: Boolean, submittedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
         val receivedNs = receivedByPts.remove(presentationTimeUs)
         if (!render) return
         if (receivedNs != null) record(Stage.RECEIVE_TO_SUBMIT, submittedNs - receivedNs)
@@ -39,11 +43,13 @@ internal class VideoPipelineStats(
     }
 
     fun decoderChanged() {
+        if (!RuntimeDiagnostics.enabled()) return
         receivedByPts.clear()
         lastSubmitNs = null
     }
 
     fun record(stage: Stage, elapsedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
         if (elapsedNs < 0) return
         val index = stage.ordinal
         counts[index]++
@@ -52,13 +58,18 @@ internal class VideoPipelineStats(
     }
 
     fun output(render: Boolean) {
+        if (!RuntimeDiagnostics.enabled()) return
         decoded++
         if (render) rendered++
     }
 
-    fun superseded() { superseded++ }
+    fun superseded() {
+        if (!RuntimeDiagnostics.enabled()) return
+        superseded++
+    }
 
     fun flush(ended: Boolean = false) {
+        if (!RuntimeDiagnostics.enabled()) return
         val now = nanoTime()
         if (!ended && now - started < 5_000_000_000L) return
         if (counts.all { it == 0L } && decoded == 0L) {

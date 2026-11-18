@@ -39,6 +39,7 @@ class ManualHotspotManager(
     channel: Int,
     security: ManualHotspotSecurity,
     private val onDiagnostic: (String) -> Unit = {},
+    private val geelyFactoryAp: Boolean = false,
 ) : WirelessHotspotManager {
     private val appContext = context.applicationContext
     private val connectivityManager = appContext.systemService(ConnectivityManager::class.java, "connectivity")
@@ -78,7 +79,7 @@ class ManualHotspotManager(
         require(timeoutMillis > 0) { "timeoutMillis must be positive" }
 
         val deadlineNanos = deadlineAfter(timeoutMillis)
-        val apConfiguration = readApConfiguration()
+        val apConfiguration = if (geelyFactoryAp) null else readApConfiguration()
         if (apConfiguration != null && apConfiguration.ssid != expectedSsid) {
             throw IOException(
                 "Manual hotspot SSID does not match the active local AP configuration: " +
@@ -92,22 +93,29 @@ class ManualHotspotManager(
             check(!closed) { "ManualHotspotManager is closed" }
             val localInterface = findLocalHotspotInterface()
             if (localInterface != null) {
-                val connectionFrequency = frequencyFromConnectionInfo()
-                val scanFrequency = frequencyFromScanResult(localInterface)
+                val factoryFrequency = if (geelyFactoryAp) LegacyHotspotRadio.read(localInterface.name, null) else null
+                val connectionFrequency = if (geelyFactoryAp) null else frequencyFromConnectionInfo()
+                val scanFrequency = if (geelyFactoryAp) null else frequencyFromScanResult(localInterface)
                 val observedChannel = observedManualHotspotChannel(
                     apChannel = apConfiguration?.channel ?: 0,
                     connectionFrequencyMHz = connectionFrequency,
                     scanFrequencyMHz = scanFrequency,
-                    apFrequencyMHz = apConfiguration?.frequencyMHz,
+                    apFrequencyMHz = factoryFrequency?.frequencyMHz ?: apConfiguration?.frequencyMHz,
                 )
-                val channel = com.shilapi.xcertplay.compat.H52WirelessDiagnostics.channel(observedChannel, expectedChannel)
+                val channel = if (geelyFactoryAp) observedChannel else {
+                    com.shilapi.xcertplay.compat.H52WirelessDiagnostics.channel(observedChannel, expectedChannel)
+                }
                 val frequencyMHz = when {
+                    factoryFrequency != null -> factoryFrequency.frequencyMHz
                     apConfiguration?.frequencyMHz != null -> apConfiguration.frequencyMHz
                     connectionFrequency != null -> connectionFrequency
                     scanFrequency != null -> scanFrequency
                     else -> null
                 }
                 val security = apConfiguration?.security ?: expectedSecurity
+                if (geelyFactoryAp) Log.i("DiPlayGeelyWifi",
+                    "factory AP interface=${localInterface.name} channel=$channel " +
+                        "frequencyMHz=${frequencyMHz ?: "unknown"} radio=${factoryFrequency?.error ?: "ok"}")
                 onDiagnostic("Manual hotspot configReadable=${apConfiguration != null} " +
                     "security=$security channelKnown=${channel > 0} " +
                     "hardwareAddressKnown=${localInterface.hardwareAddress != null} iface=${localInterface.name} " +
@@ -237,7 +245,8 @@ class ManualHotspotManager(
         networkInterface: NetworkInterface,
         primaryInterface: String?,
     ): Boolean = try {
-        networkInterface.name != primaryInterface &&
+        (!geelyFactoryAp || networkInterface.name == "wlan0") &&
+            networkInterface.name != primaryInterface &&
             !networkInterface.isLoopback &&
             networkInterface.isUp &&
             EXCLUDED_INTERFACE_PREFIXES.none { networkInterface.name.startsWith(it) }
@@ -263,8 +272,12 @@ class ManualHotspotManager(
         return score
     }
 
-    private fun NetworkInterface.hotspotAddress(): InetAddress? =
-        wirelessHostAddress(Collections.list(inetAddresses), indexCompat)
+    private fun NetworkInterface.hotspotAddress(): InetAddress? {
+        val addresses = Collections.list(inetAddresses)
+        // H53 uses wlan0 for both modes; wait for the factory tether address, not a stale STA IP.
+        if (geelyFactoryAp && addresses.none { it is Inet4Address && it.hostAddress == "192.168.43.1" }) return null
+        return wirelessHostAddress(addresses, indexCompat)
+    }
 
     private fun frequencyFromConnectionInfo(): Int? {
         val connectionInfo = try {

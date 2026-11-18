@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
+
 /** Receive-thread timing only: no payloads, endpoint addresses, or route data. */
 internal class StreamReceiveStats(
     private val label: String,
@@ -30,14 +32,19 @@ internal class StreamReceiveStats(
 
     /** Pure decrypt-call duration, including failed authentication; excludes downstream callbacks. */
     fun decrypted(elapsedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
         decryptCount++
         decryptNs += elapsedNs.coerceAtLeast(0L)
         decryptMaxNs = maxOf(decryptMaxNs, elapsedNs)
     }
 
-    fun reading() { readStart = nowNs() }
+    fun reading() {
+        if (!RuntimeDiagnostics.enabled()) return
+        readStart = nowNs()
+    }
 
     fun received(size: Int, sequence: Int? = null, timestamp: Int? = null) {
+        if (!RuntimeDiagnostics.enabled()) return
         processingStart = nowNs()
         maxReadNs = maxOf(maxReadNs, processingStart - readStart)
         if (lastReceivedNs != 0L) {
@@ -66,11 +73,13 @@ internal class StreamReceiveStats(
     }
 
     fun processed() {
+        if (!RuntimeDiagnostics.enabled()) return
         maxProcessNs = maxOf(maxProcessNs, nowNs() - processingStart)
         flush()
     }
 
     fun flush(ended: Boolean = false) {
+        if (!RuntimeDiagnostics.enabled()) return
         val now = nowNs()
         if (!ended && now - windowStart < 5_000_000_000L) return
         runCatching { report("Receive: $label packets=$packets bytes=$bytes readMaxMs=${maxReadNs / 1_000_000} " +

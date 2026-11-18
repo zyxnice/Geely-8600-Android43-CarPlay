@@ -6,9 +6,16 @@ plugins {
 val localAuthenticationAssets = providers.environmentVariable("DIPLAY_AUTH_ASSETS_DIR")
     .orNull?.let { file(it).canonicalFile }
 
-// Explicit candidate identity; ordinary builds keep their existing behaviour.
+// The Geely variant includes the merged H53 wireless diagnostics by default.
+// Explicit false retains the original USB-oriented build configuration.
 val geelyPerformanceStage = providers.gradleProperty("geelyPerformanceStage").getOrElse("off")
 require(geelyPerformanceStage in listOf("off", "A", "B", "C")) { "Expected geelyPerformanceStage=off, A, B or C" }
+val geelyWifiTrial = providers.gradleProperty("geelyWifiTrial").map(String::toBooleanStrict).getOrElse(true)
+val geelyWifiQuiet = providers.gradleProperty("geelyWifiQuiet").map(String::toBooleanStrict).getOrElse(false)
+val geelyWifiLogComparison = geelyWifiQuiet ||
+    providers.gradleProperty("geelyWifiLogComparison").map(String::toBooleanStrict).getOrElse(geelyWifiTrial)
+require(!geelyWifiQuiet || geelyWifiTrial) { "geelyWifiQuiet requires geelyWifiTrial=true; USB must retain diagnostics" }
+require(!geelyWifiLogComparison || geelyWifiTrial) { "Log comparison builds require geelyWifiTrial=true" }
 
 android {
     namespace = "com.shilapi.xcertplay"
@@ -53,9 +60,25 @@ android {
                 enable = true
             }
             multiDexEnabled = false
+            // R8 keeps logging invokes in debug mode. Both comparison APKs use the same
+            // release-mode optimizer, so the pair differs only in diagnostics and identity.
+            if (geelyWifiLogComparison) isDebuggable = false
             applicationIdSuffix = ".repair1.geely8600"
-            versionNameSuffix = if (geelyPerformanceStage == "off") "-H53-USB2" else "-H53-USB3-$geelyPerformanceStage"
+            versionNameSuffix = when {
+                geelyWifiQuiet -> "-H53-1.0-DIAG-NOLOG-20261118"
+                geelyWifiLogComparison -> "-H53-1.0-DIAG-LOG-20261118"
+                geelyWifiTrial -> "-H53-1.0-DIAG-20261118"
+                geelyPerformanceStage == "off" -> "-H53-USB2"
+                else -> "-H53-USB3-$geelyPerformanceStage"
+            }
             manifestPlaceholders["geelyMediaStage"] = geelyPerformanceStage
+            manifestPlaceholders["geelyWifiTrial"] = geelyWifiTrial
+            if (geelyWifiQuiet) proguardFiles("wifi-quiet.pro")
+            manifestPlaceholders["geelyTestLabel"] = if (geelyWifiTrial) {
+                "DiPlay 8600 1.0诊断版"
+            } else {
+                "@string/geely_usb_app_name"
+            }
             matchingFallbacks += listOf("debug")
         }
         release {

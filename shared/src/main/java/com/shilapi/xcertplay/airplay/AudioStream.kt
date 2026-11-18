@@ -129,11 +129,13 @@ class AudioStream(
                 val sample = readU32Be(wire, 4)
 
                 val payload = try {
-                    val decryptStarted = System.nanoTime()
+                    val decryptStarted = if (com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) System.nanoTime() else 0L
                     try {
                         crypto.open(key, packetBuffers.nonce, packetBuffers.sealed, packetBuffers.aad)
                     } finally {
-                        stats.decrypted(System.nanoTime() - decryptStarted)
+                        if (com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) {
+                            stats.decrypted(System.nanoTime() - decryptStarted)
+                        }
                     }
                 } catch (error: Exception) {
                     val failureNumber = authenticationFailures.incrementAndGet()

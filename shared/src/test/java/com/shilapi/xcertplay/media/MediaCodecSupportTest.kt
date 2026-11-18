@@ -8,6 +8,55 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.assertFalse
 
 class MediaCodecSupportTest {
+    @Test fun directAacPackingMatchesExistingAdtsAtBothWifiRatesWithoutStaleTail() {
+        val target = java.nio.ByteBuffer.allocateDirect(8192)
+        for (rate in listOf(44_100, 48_000)) {
+            for (length in listOf(8184, 512, 1, 6, 1024, 7, 4096, 2)) {
+                val rtp = ByteArray(length + 12) { (it * 37 + length).toByte() }
+                val original = rtp.copyOf()
+                target.clear()
+                val bytes = MediaCodecSupport.writeAdtsFrame(target, rtp, 12, length, rate, 2)
+                assertEquals(length + 7, bytes)
+                assertEquals(bytes, target.position())
+                val encoded = ByteArray(bytes)
+                target.flip()
+                target.get(encoded)
+                assertArrayEquals(MediaCodecSupport.adtsFrame(rtp.copyOfRange(12, rtp.size), rate, 2), encoded)
+                assertArrayEquals(original, rtp)
+                val adtsLength = ((encoded[3].toInt() and 3) shl 11) or
+                    ((encoded[4].toInt() and 255) shl 3) or ((encoded[5].toInt() and 224) ushr 5)
+                assertEquals(bytes, adtsLength)
+            }
+        }
+    }
+
+    @Test fun directAacPackingRejectsInvalidOrOversizeInputWithoutPartialHeader() {
+        val target = java.nio.ByteBuffer.allocate(8192)
+        val source = ByteArray(8200)
+        for ((offset, length) in listOf(-1 to 8, 0 to -1, 0 to 0, 0 to 8185,
+                8199 to 2, Int.MAX_VALUE to 1, 1 to Int.MAX_VALUE)) {
+            target.clear()
+            target.put(42)
+            val before = target.array().copyOf()
+            assertEquals(0, MediaCodecSupport.writeAdtsFrame(target, source, offset, length, 48_000, 2))
+            assertEquals(1, target.position())
+            assertArrayEquals(before, target.array())
+        }
+        target.clear()
+        target.limit(10)
+        assertEquals(0, MediaCodecSupport.writeAdtsFrame(target, source, 12, 4, 48_000, 2))
+        assertEquals(0, target.position())
+    }
+
+    @Test fun directAacPackingHonorsTheDestinationPosition() {
+        val target = java.nio.ByteBuffer.allocate(16)
+        target.put(42)
+        assertEquals(9, MediaCodecSupport.writeAdtsFrame(target, byteArrayOf(5, 6, 7), 1, 2, 48_000, 2))
+        assertEquals(42, target.get(0).toInt())
+        assertArrayEquals(MediaCodecSupport.adtsFrame(byteArrayOf(6, 7), 48_000, 2),
+            target.array().copyOfRange(1, 10))
+    }
+
     @Test fun truncatedAccessUnitIsRejectedInsteadOfSubmittingItsValidPrefix() {
         assertEquals(0, MediaCodecSupport.toAnnexB(byteArrayOf(0, 0, 0, 2, 0x41, 1, 0, 0, 0, 9, 0x41)).size)
         assertEquals(0, MediaCodecSupport.toAnnexB(byteArrayOf(0, 0, 0, 2, 0x41, 1, 0)).size)

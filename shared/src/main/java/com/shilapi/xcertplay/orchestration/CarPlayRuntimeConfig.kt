@@ -63,6 +63,8 @@ class CarPlayRuntimeConfig(
     val manualHotspotSecurity: ManualHotspotSecurity = ManualHotspotSecurity.WPA2,
     val wirelessBluetoothDeviceAddress: String? = null,
     val locationReportingEnabled: Boolean = false,
+    /** H53 Wi-Fi trial reads the saved AP configuration from firmware at connection time. */
+    val useGeelyFactoryHotspot: Boolean = false,
 ) {
     init {
         require(iphoneDevices.all { it.vendorId == APPLE_VENDOR_ID }) {
@@ -94,7 +96,13 @@ class CarPlayRuntimeConfig(
             "Remote MFi token must not contain U+0000"
         }
         // Only a wireless session starts the hotspot; a USB session must not fail on unused settings.
-        if (transport == CarPlayTransport.WIRELESS && wirelessHotspotMode == WirelessHotspotMode.MANUAL) {
+        require(
+            !useGeelyFactoryHotspot ||
+                (transport == CarPlayTransport.WIRELESS && wirelessHotspotMode == WirelessHotspotMode.MANUAL),
+        ) { "The H53 factory hotspot requires wireless car-hotspot mode" }
+        if (transport == CarPlayTransport.WIRELESS && wirelessHotspotMode == WirelessHotspotMode.MANUAL &&
+            !useGeelyFactoryHotspot
+        ) {
             val ssid = manualHotspotSsid
             require(!ssid.isNullOrBlank()) {
                 "manualHotspotSsid is required in manual hotspot mode"

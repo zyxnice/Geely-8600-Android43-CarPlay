@@ -20,6 +20,7 @@ import com.shilapi.xcertplay.airplay.VideoCodec
 import com.shilapi.xcertplay.airplay.toHexString
 import com.shilapi.xcertplay.compat.getOrPutCompat
 import com.shilapi.xcertplay.compat.systemService
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
 import java.io.Closeable
 import java.io.File
 import java.nio.ByteBuffer
@@ -328,6 +329,8 @@ class AndroidMediaSink(
     private val navigationStreamType: Int = AudioChannelMapper.DEFAULT_NAVIGATION_STREAM_TYPE,
     onScreenStreamActiveChanged: ((Int, Boolean) -> Unit)? = null,
     private val mediaBufferMillis: Int = MediaAudioBuffer.DEFAULT_MILLIS,
+    /** Enables the H53 wireless-specific AAC decoder and playback recovery behavior. */
+    private val h53WirelessAacEnabled: Boolean = false,
     private val onAudioDiagnostic: (String) -> Unit = {},
     /** True while any music ("media") audio stream is running; called from media threads. */
     private val onMediaAudioChanged: (Boolean) -> Unit = {},
@@ -622,6 +625,7 @@ class AndroidMediaSink(
             onAudioDiagnostic,
             geelyAudio,
             geelyNavigationAlert,
+            h53WirelessAacEnabled,
         ).also { audioRenderers[id] = it }
     }
 }
@@ -640,7 +644,7 @@ private class VideoDecoder(
     traceDirectory: File? = null,
 ) : Closeable {
     // Diagnostic I/O and formatting stay off receive/decode/UI threads.
-    private val traceLog = traceDirectory?.let { directory ->
+    private val traceLog = traceDirectory?.takeIf { RuntimeDiagnostics.enabled() }?.let { directory ->
         FrameTraceLog(File(directory, "frames-${android.os.Process.myPid()}-${System.nanoTime()}.csv"),
             status = { Log.i("DiPlay-FrameTrace", it) }).let { if (it.start()) it else null }
     }
@@ -1154,6 +1158,10 @@ private fun MediaFormat.intOrNull(key: String): Int? =
         }
     }
 
+internal fun usesH53WirelessAac(enabled: Boolean, format: AudioFormat): Boolean =
+    enabled && format.codec == AudioCodecKind.AAC_LC && format.payloadType == 102 &&
+        format.audioType == "media" && format.channels == 2 && format.sampleRate in listOf(44_100, 48_000)
+
 /** Decodes AAC-LC/Opus to PCM and plays it, or plays wired LPCM directly. */
 private class AudioRenderer(
     val format: AudioFormat,
@@ -1167,15 +1175,22 @@ private class AudioRenderer(
     private val report: (String) -> Unit,
     private val geelyAudio: GeelyAudioCapabilities?,
     private val geelyNavigationAlert: Boolean,
+    h53WirelessAacEnabled: Boolean,
 ) : Closeable {
-    private data class AudioPacket(val rtp: ByteArray, val sample: Int)
+    private data class AudioPacket(val rtp: ByteArray, val sample: Int, val receivedNs: Long = 0L)
 
     // AudioAttributes is API 21; an Any field keeps the Android 4.3 verifier away from it.
     private var trackAttributes: Any? = null
     private var legacyTrackStreamType = AudioManager.STREAM_MUSIC
     private var mappedChannel: AudioChannel? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
+    private val h53WirelessAac = usesH53WirelessAac(h53WirelessAacEnabled, format)
     // Only the audio worker uses this storage; writePcm completes before the next packet.
+    private val aacDiagnostics = if (h53WirelessAac && RuntimeDiagnostics.enabled()) {
+        AacDecodeDiagnostics(inspectSamples = false)
+    } else null
+    // Same renderer-thread lifetime as the codec; USB keeps its existing drain path.
+    private var wirelessCodecOutputInfo: MediaCodec.BufferInfo? = null
     private val pcmScratch = PcmScratchBuffer()
     @Volatile private var running = true
     @Volatile private var started = false
@@ -1225,10 +1240,10 @@ private class AudioRenderer(
 
     fun submit(rtp: ByteArray, sample: Int) {
         if (started) {
-            packetsReceived.incrementAndGet()
+            if (RuntimeDiagnostics.enabled()) packetsReceived.incrementAndGet()
             val now = System.nanoTime()
             val previous = lastArrivalNs.getAndSet(now)
-            if (previous != 0L) {
+            if (RuntimeDiagnostics.enabled() && previous != 0L) {
                 // AtomicLong.accumulateAndGet is API 24; use compareAndSet on older Android.
                 val gap = (now - previous) / 1_000_000L
                 var current = maxArrivalGapMs.get()
@@ -1237,7 +1252,8 @@ private class AudioRenderer(
                 }
             }
         }
-        if (!started || !queue.offer(AudioPacket(rtp, sample))) {
+        if (!started || !queue.offer(AudioPacket(rtp, sample,
+                if (aacDiagnostics != null) System.nanoTime() else 0L))) {
             if (started) packetsDropped.incrementAndGet()
             if (started && !droppedPacketsLogged) {
                 droppedPacketsLogged = true
@@ -1270,6 +1286,7 @@ private class AudioRenderer(
             createTrack()
             requestAudioFocus()
             while (running) {
+                // Decode available packets immediately. The PCM track owns the startup buffer.
                 queue.poll(AUDIO_POLL_MILLIS, TimeUnit.MILLISECONDS)?.let(::handle)
                 // Output becomes ready asynchronously, including after the last packet of a burst.
                 // Waiting for the next UDP packet can strand decoded sound for hundreds of ms.
@@ -1281,6 +1298,8 @@ private class AudioRenderer(
             // Worker shut down.
         } catch (error: Exception) {
             if (running) {
+                reportAac { "event=renderer_failed phase=${aacDiagnostics?.phase} " +
+                    "error=${error.javaClass.simpleName} message=${error.message}" }
                 Log.e(TAG, "audio renderer worker failed", error)
                 report("Audio: renderer failed audioType=${format.audioType} error=${error.javaClass.simpleName}")
             }
@@ -1291,6 +1310,7 @@ private class AudioRenderer(
     }
 
     private fun configureCodec(mime: String) {
+        aacDiagnostics?.phase = "configure"
         val mediaFormat = MediaFormat().apply {
             setString(MediaFormat.KEY_MIME, mime)
             setInteger(MediaFormat.KEY_SAMPLE_RATE, format.sampleRate)
@@ -1317,9 +1337,14 @@ private class AudioRenderer(
                 it.configure(mediaFormat, null, null, 0)
                 it.start()
                 Log.i(TAG, "audio decoder configured mime=$mime name=${it.name}")
+                reportAac { "event=configured decoder=${it.name} mime=$mime " +
+                    "rate=${format.sampleRate} channels=${format.channels} adts=true " +
+                    "csd0=${aacAudioSpecificConfig().toHexString()} " +
+                    "inputPacking=direct-adts outputOwnership=release-before-write outputInfo=reused" }
             }
         } catch (error: Exception) {
             Log.e(TAG, "audio decoder configuration failed mime=$mime", error)
+            reportAac { "event=configure_failed error=${error.javaClass.simpleName} message=${error.message}" }
             null
         }
     }
@@ -1385,9 +1410,23 @@ private class AudioRenderer(
             )
         }
         track = built
-        val capacityBytes = (PortableAudio.bufferSizeInFrames(built).takeIf { it > 0 }?.times(frameBytes)
+        val measuredFrames = if (h53WirelessAac) {
+            PortableAudio.bufferSizeInFrames(built).takeIf { it > 0 }
+                ?: PortableAudio.legacyBufferCapacityFrames(built)
+        } else -1
+        val capacityBytes = (measuredFrames.takeIf { it > 0 && it <= Int.MAX_VALUE / frameBytes }?.times(frameBytes)
+            ?: PortableAudio.bufferSizeInFrames(built).takeIf { it > 0 }?.times(frameBytes)
             ?: PortableAudio.bufferSizeBytes(built)).coerceAtLeast(minBuffer)
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
+        reportAac { "event=track_plan configuredMs=$mediaBufferMillis " +
+            "minMs=${minBuffer * 1000L / bytesPerSecond} capacityMs=${capacityBytes * 1000L / bytesPerSecond} " +
+            "startMs=${startThresholdBytes * 1000L / bytesPerSecond}" }
+        if (h53WirelessAac) {
+            report("Audio: wireless PCM buffer requestedTrackBytes=${plan.trackBufferBytes} " +
+                "measuredTrackFrames=$measuredFrames capacityKnown=${measuredFrames > 0} " +
+                "capacityFallbackBytes=${if (measuredFrames > 0) 0 else capacityBytes} " +
+                "headOnlyRecovery=true")
+        }
         report("Audio: ready audioType=${format.audioType} codec=${format.codec} " +
             "rate=${format.sampleRate} channels=${format.channels} " +
             "route=$routeLabel " +
@@ -1544,9 +1583,23 @@ private class AudioRenderer(
         when (format.codec) {
             AudioCodecKind.LPCM -> writePcm(pcmScratch.copySwapped(rtp, 12), length = rtp.size - 12)
             AudioCodecKind.AAC_LC -> {
+                if (h53WirelessAac) {
+                    val length = rtp.size - 12
+                    aacDiagnostics?.accessUnit(length.coerceAtLeast(0), packet.receivedNs)
+                    if (length > 0) {
+                        if (RuntimeDiagnostics.enabled() && (!firstAacPayloadLogged)) {
+                            firstAacPayloadLogged = true
+                            Log.i(TAG, "audio AAC access unit bytes=$length " +
+                                "head=${rtp.copyOfRange(12, 12 + minOf(length, 16)).toHexString()}")
+                        }
+                        feedCodec(rtp, timestampUs, offset = 12, length = length, wrapAdts = true)
+                    }
+                    return
+                }
                 val accessUnit = rtp.copyOfRange(12, rtp.size)
+                aacDiagnostics?.accessUnit(accessUnit.size, packet.receivedNs)
                 if (accessUnit.isNotEmpty()) {
-                    if (!firstAacPayloadLogged) {
+                    if (RuntimeDiagnostics.enabled() && (!firstAacPayloadLogged)) {
                         firstAacPayloadLogged = true
                         Log.i(
                             TAG,
@@ -1575,7 +1628,7 @@ private class AudioRenderer(
                     return
                 }
                 if (accessUnit.size < MIN_OPUS_PACKET_BYTES) {
-                    if (!firstOpusShortPacketLogged) {
+                    if (RuntimeDiagnostics.enabled() && (!firstOpusShortPacketLogged)) {
                         firstOpusShortPacketLogged = true
                         Log.i(
                             TAG,
@@ -1593,9 +1646,21 @@ private class AudioRenderer(
     private fun sampleTimestampUs(sample: Int): Long =
         (sample.toLong() and 0xffff_ffffL) * 1_000_000L / format.sampleRate
 
-    private fun feedCodec(payload: ByteArray, presentationTimeUs: Long) {
-        val codec = codec ?: return
+    private fun feedCodec(
+        payload: ByteArray,
+        presentationTimeUs: Long,
+        offset: Int = 0,
+        length: Int = payload.size,
+        wrapAdts: Boolean = false,
+    ) {
+        val codec = codec ?: run {
+            aacDiagnostics?.noCodec()
+            return
+        }
+        aacDiagnostics?.phase = "dequeue_input"
+        val waitStarted = if (aacDiagnostics != null) System.nanoTime() else 0L
         val index = codec.dequeueInputBuffer(INPUT_TIMEOUT_US)
+        aacDiagnostics?.inputDequeued(index, System.nanoTime() - waitStarted)
         if (index < 0) {
             inputDropped++
             if (inputDropped == 1) {
@@ -1607,21 +1672,37 @@ private class AudioRenderer(
             }
             return
         }
-        val input = inputBufferAt(codec, index) ?: return
+        val input = inputBufferAt(codec, index) ?: run {
+            aacDiagnostics?.inputMissing()
+            return
+        }
         input.clear()
-        if (payload.size <= input.remaining()) {
+        val queuedBytes = if (wrapAdts) {
+            MediaCodecSupport.writeAdtsFrame(input, payload, offset, length, format.sampleRate, format.channels)
+        } else if (payload.size <= input.remaining()) {
             input.put(payload)
-            codec.queueInputBuffer(index, 0, payload.size, presentationTimeUs, 0)
+            payload.size
+        } else 0
+        if (queuedBytes > 0 || (!wrapAdts && payload.isEmpty())) {
+            aacDiagnostics?.phase = "queue_input"
+            val queueStarted = if (aacDiagnostics != null) System.nanoTime() else 0L
+            // Copy the first encoded header before queueInputBuffer transfers ownership.
+            val firstHead = if (RuntimeDiagnostics.enabled() && !firstInputQueuedLogged && wrapAdts) {
+                ByteArray(minOf(queuedBytes, 16)) { input.get(it) }.toHexString()
+            } else null
+            codec.queueInputBuffer(index, 0, queuedBytes, presentationTimeUs, 0)
+            aacDiagnostics?.queued(presentationTimeUs, System.nanoTime() - queueStarted)
             inputQueued++
-            if (!firstInputQueuedLogged) {
+            if (RuntimeDiagnostics.enabled() && (!firstInputQueuedLogged)) {
                 firstInputQueuedLogged = true
                 Log.i(
                     TAG,
-                    "audio decoder first input codec=${format.codec} bytes=${payload.size} " +
-                        "head=${payload.copyOf(minOf(payload.size, 16)).toHexString()}",
+                    "audio decoder first input codec=${format.codec} bytes=$queuedBytes " +
+                        "head=${firstHead ?: payload.copyOf(minOf(payload.size, 16)).toHexString()}",
                 )
             }
         } else {
+            aacDiagnostics?.oversize()
             codec.queueInputBuffer(index, 0, 0, 0, 0)
             inputDropped++
         }
@@ -1629,18 +1710,29 @@ private class AudioRenderer(
     }
 
     private fun drainCodec(codec: MediaCodec) {
-        val info = MediaCodec.BufferInfo()
+        val info = if (h53WirelessAac) {
+            wirelessCodecOutputInfo ?: MediaCodec.BufferInfo().also { wirelessCodecOutputInfo = it }
+        } else MediaCodec.BufferInfo()
         while (running) {
+            aacDiagnostics?.phase = "dequeue_output"
+            val pollStarted = if (aacDiagnostics != null) System.nanoTime() else 0L
             val index = codec.dequeueOutputBuffer(info, 0)
+            aacDiagnostics?.outputPolled(index == MediaCodec.INFO_TRY_AGAIN_LATER, System.nanoTime() - pollStarted)
             when {
                 index == MediaCodec.INFO_TRY_AGAIN_LATER -> return
-                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> Unit
+                index == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
+                    if (aacDiagnostics != null) {
+                        reportAac { "event=output_format format=${runCatching { codec.outputFormat.toString() }.getOrDefault("unavailable")} " +
+                            "expectedRate=${format.sampleRate} expectedChannels=${format.channels}" }
+                    }
+                }
                 index == MediaCodec.INFO_OUTPUT_BUFFERS_CHANGED -> Unit
                 index >= 0 -> {
                     val size = info.size
+                    if (size == 0) aacDiagnostics?.emptyOutput()
                     if (size > 0) {
                         outputBuffers++
-                        if (outputBuffers == 1 || outputBuffers % DECODED_BUFFER_LOG_INTERVAL == 0) {
+                        if (RuntimeDiagnostics.enabled() && (outputBuffers == 1 || outputBuffers % DECODED_BUFFER_LOG_INTERVAL == 0)) {
                             Log.i(
                                 TAG,
                                 "audio decoder output codec=${format.codec} " +
@@ -1649,6 +1741,31 @@ private class AudioRenderer(
                             )
                         }
                     }
+                    if (h53WirelessAac) {
+                        var copied = false
+                        try {
+                            if (size > 0) {
+                                val output = outputBufferAt(codec, index)
+                                if (output != null) {
+                                    if (size > pcm.size) pcm = ByteArray(size)
+                                    output.position(info.offset)
+                                    output.limit(info.offset + size)
+                                    output.get(pcm, 0, size)
+                                    copied = true
+                                } else aacDiagnostics?.outputMissing()
+                            }
+                        } finally {
+                            // PCM is now renderer-owned. Return the codec buffer before the
+                            // diagnostic scan and blocking AudioTrack.write, even if copying fails.
+                            codec.releaseOutputBuffer(index, false)
+                        }
+                        if (copied) {
+                            aacDiagnostics?.pcm(pcm, 0, size, info.presentationTimeUs)
+                            writePcm(pcm, 0, size)
+                        }
+                        if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
+                        continue
+                    }
                     if (size > 0) {
                         val output = outputBufferAt(codec, index)
                         if (output != null) {
@@ -1656,7 +1773,10 @@ private class AudioRenderer(
                             output.position(info.offset)
                             output.limit(info.offset + size)
                             output.get(pcm, 0, size)
+                            aacDiagnostics?.pcm(pcm, 0, size, info.presentationTimeUs)
                             writePcm(pcm, 0, size)
+                        } else {
+                            aacDiagnostics?.outputMissing()
                         }
                     }
                     codec.releaseOutputBuffer(index, false)
@@ -1669,7 +1789,7 @@ private class AudioRenderer(
 
     private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
         val track = track ?: return
-        if (!firstPcmLogged && length > 0) {
+        if (RuntimeDiagnostics.enabled() && (!firstPcmLogged && length > 0)) {
             firstPcmLogged = true
             val end = minOf(data.size, offset + minOf(length, 16))
             Log.i(
@@ -1689,9 +1809,12 @@ private class AudioRenderer(
             } else {
                 minOf(length - written, PREBUFFER_WRITE_CHUNK_BYTES)
             }
-            val writeStarted = System.nanoTime()
+            val writeStarted = if (RuntimeDiagnostics.enabled()) System.nanoTime() else 0L
+            aacDiagnostics?.phase = "track_write"
             val count = PortableAudio.writeBlocking(track, data, offset + written, writeLength)
-            maxWriteMs = maxOf(maxWriteMs, (System.nanoTime() - writeStarted) / 1_000_000L)
+            if (RuntimeDiagnostics.enabled()) {
+                maxWriteMs = maxOf(maxWriteMs, (System.nanoTime() - writeStarted) / 1_000_000L)
+            }
             if (count < 0) {
                 writeErrorsThisWindow++
                 lastWriteErrorCode = count
@@ -1722,18 +1845,26 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = PortableAudio.underrunCount(track)
         track.play()
         playbackStarted = true
+        reportAac { "event=track_play playState=${track.playState} prebufferBytes=$prebufferBytes " +
+            "thresholdBytes=$startThresholdBytes writtenFrames=$totalWrittenFrames rebuffers=$rebufferCount " +
+            aacDiagnostics?.startupTiming().orEmpty() }
     }
 
     private fun maintainPlaybackBuffer() {
         val track = track ?: return
         if (bufferProgress.shouldRebuffer(mappedChannel == AudioChannel.MEDIA, playbackStarted,
-                PortableAudio.underrunCount(track) > underrunsAtPlaybackStart, queue.isEmpty(), track.playbackHeadPosition)) {
+                PortableAudio.underrunCount(track) > underrunsAtPlaybackStart, queue.isEmpty(),
+                track.playbackHeadPosition, allowHeadOnly = h53WirelessAac)) {
             // The hardware buffer has actually drained. Pause without flushing or discarding PCM,
             // then use the configured start threshold again when music resumes.
             track.pause()
             playbackStarted = false
             prebufferBytes = 0
             rebufferCount++
+            if (h53WirelessAac) {
+                report("Audio: wireless PCM buffer depleted rebuffers=$rebufferCount " +
+                    "headFrames=${track.playbackHeadPosition} writtenFrames=$totalWrittenFrames")
+            }
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.
         if (!playbackStarted && prebufferBytes > 0 && queue.isEmpty() &&
@@ -1744,6 +1875,7 @@ private class AudioRenderer(
 
     // Persist counters even during packet starvation, and flush before disconnect releases the track.
     private fun logStatsIfDue(force: Boolean = false) {
+        if (!RuntimeDiagnostics.enabled()) return
         val now = System.nanoTime()
         if (statsWindowStartNs == 0L) statsWindowStartNs = now
         if (!force && now - statsWindowStartNs < STATS_WINDOW_NS) return
@@ -1776,6 +1908,15 @@ private class AudioRenderer(
             "decoderDroppedTotal=$inputDropped outputBuffersTotal=$outputBuffers rebuffers=$rebufferCount ended=$force"
         Log.i(STATS_TAG, line)
         report(line)
+        aacDiagnostics?.let {
+            reportAac { "event=window sampledAtNs=$now ${it.snapshot()} codecReady=${codec != null} " +
+                "queue=${queue.size} playState=${currentTrack?.playState ?: -1} " +
+                "pcmQueuedMs=${queuedFrames?.let { frames -> frames * 1000L / format.sampleRate } ?: -1} " +
+                "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} " +
+                "writtenFrames=$writtenFramesThisWindow playbackAdvanceFrames=${playbackAdvanceFrames ?: -1} " +
+                "maxWriteMs=$maxWriteMs writeErrors=$writeErrorsThisWindow zeroWrites=$zeroWritesThisWindow " +
+                "partialWrites=$partialWritesThisWindow underrunCounterAvailable=${Build.VERSION.SDK_INT >= 24} ended=$force" }
+        }
         statsLastUnderruns = underruns
         maxWriteMs = 0L
         writtenFramesThisWindow = 0L
@@ -1784,6 +1925,19 @@ private class AudioRenderer(
         zeroWritesThisWindow = 0
         partialWritesThisWindow = 0
         statsWindowStartNs = now
+    }
+
+    private inline fun reportAac(message: () -> String) {
+        val diagnostic = aacDiagnostics ?: return
+        val startedNs = System.nanoTime()
+        try {
+            val line = "AAC: stream=${diagnostic.streamId} ${message()}"
+            Log.i("DiPlay-AAC", line)
+            report(line)
+        } finally {
+            // No extra log call here. The next existing five-second summary carries this cost.
+            diagnostic.logEmitted(System.nanoTime() - startedNs)
+        }
     }
 
     private fun applyFadeIn(data: ByteArray, offset: Int, length: Int) {

@@ -59,6 +59,7 @@ class CarPlayMediaEngine(
         val playoutLatencyMs: Int,
         @Volatile var firstSample: Int? = null,
         @Volatile var originNs: Long? = null,
+        @Volatile var nextFeedbackLogNs: Long = Long.MIN_VALUE,
     )
 
     private data class PendingIapTunnel(
@@ -169,6 +170,9 @@ class CarPlayMediaEngine(
         )
         val connectionId = stream["streamConnectionID"]
         val latencyMs = (stream["audioLatencyMs"] as? Number)?.toInt() ?: 0
+        if (type == 102 && audioType == "media") {
+            Log.i("DiPlay-AAC", "AAC: event=session_timing negotiatedLatencyMs=$latencyMs rate=${format.sampleRate}")
+        }
         val meta = AudioMeta(type, format, connectionId, latencyMs)
         val microphone = microphoneConfig(session, type, stream, format)
         if (microphone != null) pendingMicrophone[streamKey] = microphone
@@ -335,6 +339,12 @@ class CarPlayMediaEngine(
                 entry["timestamp"] = session.syncedNtp()
                 entry["timestampRawNs"] = nowNs
                 entry["sampleTime"] = sampleTime
+                if (meta.type == 102 && meta.format.audioType == "media" && nowNs >= meta.nextFeedbackLogNs) {
+                    meta.nextFeedbackLogNs = nowNs + 5_000_000_000L
+                    Log.i("DiPlay-AAC", "AAC: event=feedback_timing sampledAtNs=$nowNs " +
+                        "rate=${meta.format.sampleRate} firstRtpSample=$firstUnsigned " +
+                        "feedbackRtpSample=$sampleTime negotiatedLatencyMs=${meta.playoutLatencyMs}")
+                }
             }
             entry
         }

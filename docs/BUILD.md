@@ -4,6 +4,14 @@
 
 ## 8600 车测变体
 
+2026-11-18 主线已合入 [1.0 诊断功能](DIAGNOSTIC-INTEGRATION-20261118.md)。
+`geelyUsb` 默认启用 `geelyWifiTrial=true` 和对应 LOG 构建，版本字段为
+`0.2.10-H53-1.0-DIAG-LOG-20261118`。下述 `-PgeelyPerformanceStage=B` 命令可直接构建集成版。
+这两个属性是已有试验构建命令的兼容入口，功能在运行时仍匹配指定 H53 设备和无线会话。
+需要原 USB 构建配置时显式传入 `-PgeelyWifiTrial=false`，日志对照属性随之默认关闭。
+`-PgeelyWifiQuiet=true` 使用 NOLOG 构建，可用 `scripts/verify-geely-quiet-apk.py` 对实际 APK 核查日志裁剪。
+以下 2026-11-13 的开关撤回描述属于原始 1.0 发布记录。
+
 2026-11-13 后续确认：当前 APK 已按用户验收定为 [1.0 正式版](RELEASE-1.0-20261113.md)，
 USB/Wi-Fi 连接问题均已解决，后续重点是两种模式的流畅度。1.0 沿用下面精简源码与构建产物，
 仅晋级正式发布名称；APK 内部版本字段未改为 1.0，后文试验发布描述按历史阶段理解。

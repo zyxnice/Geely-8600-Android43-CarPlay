@@ -14,12 +14,14 @@ internal object DisplayDiagnosticSnapshot {
 
     @Synchronized
     fun selection(context: Context, previous: Int, selected: Int, reconnect: Boolean) {
+        if (!com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) return
         context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit().putString("selection",
             "${stamp()} Size setting previous=$previous% selected=$selected% reconnect=$reconnect").apply()
     }
 
     @Synchronized
     fun begin(context: Context, request: String, capability: String, effective: String): String {
+        if (!com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) return "quiet"
         val attempt = UUID.randomUUID().toString()
         val editor = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE).edit()
         fields.filter { it != "selection" }.forEach(editor::remove)
@@ -37,6 +39,7 @@ internal object DisplayDiagnosticSnapshot {
 
     @Synchronized
     fun record(context: Context, attempt: String?, message: String) {
+        if (!com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) return
         val prefs = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         if (attempt == null || prefs.getString("attempt", null) != attempt) return
         val field = when {

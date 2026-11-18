@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay.media
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
 import android.util.Log
 
 /** Five-second video counters that separate network/iPhone gaps from decoder throughput. */
@@ -19,6 +20,7 @@ internal class VideoStats(
     private var maxTouchLatencyNs = 0L
 
     @Synchronized fun onReceived(size: Int) {
+        if (!RuntimeDiagnostics.enabled()) return
         val now = nanoTime()
         val gap = now - lastArrivalNs
         if (lastArrivalNs != 0L && gap < IDLE_GAP_NS) maxArrivalGapNs = maxOf(maxArrivalGapNs, gap)
@@ -34,11 +36,18 @@ internal class VideoStats(
         bytes += size
     }
 
-    @Synchronized fun onRendered() { rendered++ }
+    @Synchronized fun onRendered() {
+        if (!RuntimeDiagnostics.enabled()) return
+        rendered++
+    }
 
-    @Synchronized fun onRecovery() { recoveries++ }
+    @Synchronized fun onRecovery() {
+        if (!RuntimeDiagnostics.enabled()) return
+        recoveries++
+    }
 
     @Synchronized fun logIfDue(): String? {
+        if (!RuntimeDiagnostics.enabled()) return null
         val now = nanoTime()
         val elapsedNs = now - windowStartNs
         if (elapsedNs < WINDOW_NS) return null

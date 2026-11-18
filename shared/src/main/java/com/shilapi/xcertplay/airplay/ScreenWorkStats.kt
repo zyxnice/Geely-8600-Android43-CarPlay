@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
+
 /** C decrypt-worker statistics; the TCP reader has its own StreamReceiveStats and shares no timers. */
 internal class ScreenWorkStats(
     private val queue: ScreenReceiveQueue,
@@ -15,15 +17,23 @@ internal class ScreenWorkStats(
     private var workerStaleDrops = 0L
 
     fun decrypted(elapsedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
         decryptCount++
         decryptNs += elapsedNs.coerceAtLeast(0)
         decryptMaxNs = maxOf(decryptMaxNs, elapsedNs)
     }
 
-    fun processed(elapsedNs: Long) { processMaxNs = maxOf(processMaxNs, elapsedNs) }
-    fun expiredAfterDecrypt() { workerStaleDrops++ }
+    fun processed(elapsedNs: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
+        processMaxNs = maxOf(processMaxNs, elapsedNs)
+    }
+    fun expiredAfterDecrypt() {
+        if (!RuntimeDiagnostics.enabled()) return
+        workerStaleDrops++
+    }
 
     fun flush(ended: Boolean = false) {
+        if (!RuntimeDiagnostics.enabled()) return
         val now = nowNs()
         if (!ended && now - windowStart < 5_000_000_000L) return
         val snapshot = queue.snapshot()

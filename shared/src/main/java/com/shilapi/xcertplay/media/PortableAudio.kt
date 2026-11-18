@@ -44,6 +44,13 @@ object PortableAudio {
     fun bufferSizeBytes(track: AudioTrack): Int =
         runCatching { AudioTrack::class.java.getMethod("getBufferSize").invoke(track) as Int }.getOrDefault(0)
 
+    /** API18 exposes a protected frame-count accessor, not a public byte-size getter. */
+    fun legacyBufferCapacityFrames(track: AudioTrack): Int = runCatching {
+        val getter = AudioTrack::class.java.getDeclaredMethod("getNativeFrameCount")
+        getter.isAccessible = true
+        (getter.invoke(track) as Int).takeIf { it > 0 } ?: -1
+    }.getOrDefault(-1)
+
     fun routedDeviceType(recorder: AudioRecord): Int? {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return null
         return runCatching { recorder.javaClass.getMethod("getRoutedDevice").invoke(recorder)?.javaClass

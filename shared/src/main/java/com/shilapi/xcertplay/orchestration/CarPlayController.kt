@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay.orchestration
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
+
 import android.Manifest
 import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothA2dp
@@ -44,6 +46,8 @@ import com.shilapi.xcertplay.network.diagnosticSummary
 import com.shilapi.xcertplay.network.CarPlayVpnService
 import com.shilapi.xcertplay.network.LocalOnlyHotspotManager
 import com.shilapi.xcertplay.network.ManualHotspotManager
+import com.shilapi.xcertplay.network.CarHotspotStartResult
+import com.shilapi.xcertplay.network.CarHotspotTools
 import com.shilapi.xcertplay.network.WifiP2pGroupManager
 import com.shilapi.xcertplay.network.WirelessHotspotInfo
 import com.shilapi.xcertplay.network.WirelessHotspotBackend
@@ -1940,7 +1944,25 @@ class CarPlayController(
 
     private fun startWirelessHotspot(generation: Int): WirelessHotspotInfo {
         val hotspotMode = config.wirelessHotspotMode
-        if (hotspotMode == WirelessHotspotMode.MANUAL &&
+        val factoryAp = if (config.useGeelyFactoryHotspot) {
+            val startedAt = android.os.SystemClock.elapsedRealtime()
+            val result = CarHotspotTools.startGeelyFactory(appContext) { isStaleWirelessRun(generation) }
+            val elapsedMs = android.os.SystemClock.elapsedRealtime() - startedAt
+            when (result) {
+                is CarHotspotStartResult.AlreadyEnabled -> result.configuration.also {
+                    Log.i("DiPlayGeelyWifi", "factory AP already enabled elapsedMs=$elapsedMs")
+                }
+                is CarHotspotStartResult.Enabled -> result.configuration.also {
+                    Log.i("DiPlayGeelyWifi", "factory AP enabled elapsedMs=$elapsedMs")
+                }
+                is CarHotspotStartResult.Failure -> {
+                    Log.w("DiPlayGeelyWifi", "factory AP failed reason=${result.reason} elapsedMs=$elapsedMs")
+                    throw IOException("Geely factory hotspot failed: ${result.reason}")
+                }
+            }
+        } else null
+        if (isStaleWirelessRun(generation)) throw IOException("Wireless hotspot start cancelled")
+        if (factoryAp == null && hotspotMode == WirelessHotspotMode.MANUAL &&
             com.shilapi.xcertplay.network.CarHotspotStatus.isEnabled(appContext) == false
         ) {
             throw IOException("The car hotspot is off. Turn it on in the car settings and connect again.")
@@ -1950,13 +1972,14 @@ class CarPlayController(
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> LocalOnlyHotspotManager(appContext, ::debugLog)
             WirelessHotspotMode.MANUAL -> ManualHotspotManager(
                 context = appContext,
-                ssid = config.manualHotspotSsid
+                ssid = factoryAp?.ssid ?: config.manualHotspotSsid
                     ?: throw IOException("Manual hotspot SSID is not configured"),
-                passphrase = config.manualHotspotPassphrase.orEmpty(),
-                band = config.manualHotspotBand,
-                channel = config.manualHotspotChannel,
-                security = config.manualHotspotSecurity,
+                passphrase = factoryAp?.passphrase ?: config.manualHotspotPassphrase.orEmpty(),
+                band = if (factoryAp != null) ManualHotspotBand.AUTO else config.manualHotspotBand,
+                channel = if (factoryAp != null) 0 else config.manualHotspotChannel,
+                security = factoryAp?.security ?: config.manualHotspotSecurity,
                 onDiagnostic = ::debugLog,
+                geelyFactoryAp = factoryAp != null,
             )
         }
         hotspot = manager
@@ -2331,6 +2354,8 @@ class CarPlayController(
     }
 
     private fun debugLog(message: String) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         Log.i(IphoneCarPlayConfiguration.TAG, message)
         try {
             uiListener?.onDebugLog(message)
@@ -2340,6 +2365,8 @@ class CarPlayController(
     }
 
     private fun connectionDiagnostic(message: String) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         try {
             // The redactor reserves "PHONE " for private phone-side log captures.
             val diagnosticPhase = if (phase == Phase.IPHONE) "USB_DISCOVERY" else phase.name
@@ -2356,6 +2383,8 @@ class CarPlayController(
         ((System.nanoTime() - startedNanos) / 1_000_000L).coerceAtLeast(0)
 
     private fun debugLog(message: String, error: Throwable) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         Log.w(IphoneCarPlayConfiguration.TAG, message, error)
         try {
             uiListener?.onDebugLog(

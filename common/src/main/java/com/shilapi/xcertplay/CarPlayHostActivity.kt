@@ -1,5 +1,7 @@
 package com.shilapi.xcertplay
 
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
+
 import android.Manifest
 import android.content.Context
 import android.content.Intent
@@ -166,6 +168,7 @@ class CarPlayHostActivity : ComponentActivity() {
         wirelessBluetoothDeviceAddress = DiPlayPreferences.phoneAddress(this),
         transport = if (wirelessEnabled) CarPlayTransport.WIRELESS else CarPlayTransport.WIRED,
         wirelessHotspotMode = wirelessHotspotMode,
+        useGeelyFactoryHotspot = usesGeelyFactoryHotspot(),
         manualHotspotSsid = manualHotspotSsid,
         manualHotspotPassphrase = manualHotspotPassphrase,
         manualHotspotBand = manualHotspotBand,
@@ -1143,6 +1146,7 @@ class CarPlayHostActivity : ComponentActivity() {
             text = connectionUiText("保存诊断报告", "Save report")
             isAllCaps = false
             contentDescription = "connection-save-report-narrow"
+            visibility = if (RuntimeDiagnostics.enabled()) View.VISIBLE else View.GONE
             setOnClickListener { saveConnectionReport() }
         }, LinearLayout.LayoutParams(dp(300), dp(56)))
         root.addView(panel, FrameLayout.LayoutParams(-1, -1))
@@ -1318,6 +1322,7 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 16f
             contentDescription = "connection-save-report"
+            visibility = if (RuntimeDiagnostics.enabled()) View.VISIBLE else View.GONE
             setOnClickListener { saveConnectionReport() }
         }, LinearLayout.LayoutParams(-2, dp(48)))
         latestLogButton = latest
@@ -2997,8 +3002,12 @@ class CarPlayHostActivity : ComponentActivity() {
         return error == null
     }
 
+    private fun usesGeelyFactoryHotspot(): Boolean =
+        wirelessEnabled && wirelessHotspotMode == WirelessHotspotMode.MANUAL &&
+            com.shilapi.xcertplay.network.GeelyFactoryHotspot.enabled(this)
+
     private fun validateManualHotspotSettings(): Boolean {
-        if (wirelessHotspotMode != WirelessHotspotMode.MANUAL) return true
+        if (wirelessHotspotMode != WirelessHotspotMode.MANUAL || usesGeelyFactoryHotspot()) return true
         val error = when {
             manualHotspotSsid.isBlank() -> getString(R.string.hotspot_ssid_is_required)
             manualHotspotSsid.encodeToByteArray().size > 32 ->
@@ -3494,8 +3503,15 @@ class CarPlayHostActivity : ComponentActivity() {
                 onScreenStreamStateChanged(controllerGeneration, type, active)
             },
             mediaBufferMillis = AirPlayPersistence.loadMediaBufferMillis(this),
+            h53WirelessAacEnabled = wirelessEnabled &&
+                com.shilapi.xcertplay.network.GeelyFactoryHotspot.enabled(this),
             onAudioDiagnostic = { message ->
-                if (message.startsWith("Microphone: ")) {
+                if (!RuntimeDiagnostics.enabled()) return@AndroidMediaSink
+                if (message.startsWith("AAC: ")) {
+                    // Only the gated Wi-Fi AAC diagnostics use this prefix. Do not let
+                    // session-file writes/rotation run on the audio renderer thread.
+                    AsyncDiagnosticLog.appendAac(diagnosticLog, message)
+                } else if (message.startsWith("Microphone: ")) {
                     AsyncDiagnosticLog.append(diagnosticLog, message)
                 } else {
                     diagnosticLog?.append(formattedLogLine(message, System.currentTimeMillis()))
@@ -3583,6 +3599,7 @@ class CarPlayHostActivity : ComponentActivity() {
             }
 
             override fun onDebugLog(message: String) {
+                if (!RuntimeDiagnostics.enabled()) return
                 if (DiagnosticRedactor.redact(message) == null) return
                 if (message.startsWith(CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX + " ")) {
                     // Retain old-controller teardown evidence without accepting its UI/session state.
@@ -3823,8 +3840,21 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun audioCaptureDirectory(): File? {
-        if (!File(filesDir, AUDIO_CAPTURE_MARKER).isFile) return null
-        return File(filesDir, AUDIO_CAPTURE_DIRECTORY)
+        if (!RuntimeDiagnostics.enabled()) return null
+
+        if (File(filesDir, AUDIO_CAPTURE_MARKER).isFile) {
+            return File(filesDir, AUDIO_CAPTURE_DIRECTORY)
+        }
+        // H53 Wi-Fi diagnosis only: explicit one-session marker lets ADB retrieve the
+        // existing bounded capture even on API18 ROMs whose run-as cannot open app data.
+        // Consume the marker before enabling capture so a reconnect does not record again.
+        if (!wirelessEnabled || !com.shilapi.xcertplay.network.GeelyFactoryHotspot.enabled(this)) return null
+        val external = getExternalFilesDir(null) ?: return null
+        val marker = File(external, AUDIO_CAPTURE_MARKER)
+        if (!marker.isFile || !marker.delete()) return null
+        val directory = File(external, AUDIO_CAPTURE_DIRECTORY)
+        Log.i(TAG, "Wi-Fi one-session audio capture enabled; bounded to 512 packets per stream")
+        return directory
     }
 
     private fun scheduleDisplaySize(width: Int, height: Int) {
@@ -4529,6 +4559,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun saveConnectionReport() {
+        if (!RuntimeDiagnostics.enabled()) return
+
         if (connectionReportSaving) return
         connectionReportSaving = true
         val app = applicationContext
@@ -4571,6 +4603,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun appendLog(message: String) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         val safe = redactSingleLogLine(message) ?: return
         val now = System.currentTimeMillis()
         sessionLog?.append(formattedLogLine(safe, now))
@@ -4578,12 +4612,16 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun appendFileLog(message: String) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         val safe = redactSingleLogLine(message) ?: return
         sessionLog?.append(formattedLogLine(safe, System.currentTimeMillis()))
     }
 
     /** Adds a current-generation connection diagnostic already written to its async file log. */
     private fun appendUiLogOnly(message: String) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         val safe = redactSingleLogLine(message) ?: return
         enqueueUiLogLine(safe, System.currentTimeMillis())
     }
@@ -4593,6 +4631,8 @@ class CarPlayHostActivity : ComponentActivity() {
         ?.replace('\n', ' ')
 
     private fun enqueueUiLogLine(message: String, timestampMillis: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         if (hostUiDestroyed) return
         val update = Runnable {
             if (hostUiDestroyed) return@Runnable
@@ -4621,6 +4661,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun initializeSessionLog() {
+        if (!RuntimeDiagnostics.enabled()) return
+
         val logFile = File(File(filesDir, "logs"), "diplay.log")
         val activeLog = SessionLogFile(logFile)
         runCatching {
@@ -4634,6 +4676,8 @@ class CarPlayHostActivity : ComponentActivity() {
     }
 
     private fun refreshLogView(nowMillis: Long) {
+        if (!RuntimeDiagnostics.enabled()) return
+
         val cutoff = nowMillis - LOG_RETENTION_MILLIS
         while (logLines.firstOrNull()?.timestampMillis?.let { it <= cutoff } == true) {
             logLines.removeFirst()

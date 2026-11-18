@@ -67,15 +67,20 @@ class CarPlayKernelNcmAttachmentTest {
         callback.isAccessible = true
         // Hold the real service monitor so the asynchronous callback cannot finish before we
         // capture and join its worker. This makes the late-generation check deterministic.
-        val worker = synchronized(service) {
+        val workers = synchronized(service) {
             val existing = Thread.getAllStackTraces().keys
             callback.invoke(service, oldGeneration, listener, IOException("Old kernel monitor event"))
-            Thread.getAllStackTraces().keys.single {
+            // Other service instances can report an asynchronous shutdown in the same
+            // window. The callback started above is held by this service monitor, so it
+            // must be among these workers; their shared name does not imply uniqueness.
+            Thread.getAllStackTraces().keys.filter {
                 it.name == "airplay-teardown" && it !in existing
-            }
+            }.also { assertTrue("The callback must start a teardown worker", it.isNotEmpty()) }
         }
-        worker.join(3_000)
-        assertFalse("Teardown worker must finish", worker.isAlive)
+        workers.forEach { worker ->
+            worker.join(3_000)
+            assertFalse("Teardown worker must finish", worker.isAlive)
+        }
         assertTrue(service.isAttached())
         assertEquals(replacement, service.startupGeneration())
         assertEquals(port, service.boundPort())

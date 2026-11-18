@@ -16,6 +16,9 @@ internal class AudioBufferProgress(private val frameBytes: Int) {
     }
 
     fun shouldRebuffer(isMedia: Boolean, playing: Boolean, underrunSinceStart: Boolean,
-        compressedQueueEmpty: Boolean, rawHead: Int): Boolean =
-        isMedia && playing && underrunSinceStart && compressedQueueEmpty && queuedBytes(rawHead) == 0L
+        compressedQueueEmpty: Boolean, rawHead: Int, allowHeadOnly: Boolean = false): Boolean =
+        // API18 has no underrun counter. The Wi-Fi trial can instead prove exhaustion from
+        // frames actually written and played; the default preserves the existing USB policy.
+        isMedia && playing && (underrunSinceStart || (allowHeadOnly && writtenBytes > 0)) &&
+            compressedQueueEmpty && queuedBytes(rawHead) == 0L
 }

@@ -70,7 +70,9 @@ internal object DiPlayPreferences {
             .putBoolean("phone_uses_geely_h52_bluetooth", geelyBluetooth)
             .apply()
     }
-    fun autoConnect(context: Context) = prefs(context).getBoolean("auto_connect", false)
+    fun autoConnect(context: Context) = prefs(context).getBoolean(
+        "auto_connect", com.shilapi.xcertplay.network.GeelyFactoryHotspot.enabled(context),
+    )
     fun saveAutoConnect(context: Context, value: Boolean) {
         prefs(context).edit().putBoolean("auto_connect", value).apply()
     }

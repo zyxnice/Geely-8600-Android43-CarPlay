@@ -51,6 +51,7 @@ import com.shilapi.xcertplay.network.CarHotspotReadResult
 import com.shilapi.xcertplay.network.CarHotspotStartResult
 import com.shilapi.xcertplay.network.CarHotspotState
 import com.shilapi.xcertplay.network.CarHotspotTools
+import com.shilapi.xcertplay.network.GeelyFactoryHotspot
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
 import com.shilapi.xcertplay.transport.EvChargingConnectors
@@ -209,7 +210,7 @@ class DiPlayActivity : ComponentActivity() {
             pendingAutoConnect = false
             if (DiPlayPreferences.autoConnect(this) && !CarPlayBackgroundSession.hasSession() &&
                 intent.getStringExtra("page") == null) {
-                connect(AirPlayPersistence.loadWirelessEnabled(this))
+                connect(GeelyFactoryHotspot.enabled(this) || AirPlayPersistence.loadWirelessEnabled(this))
             }
         }
     }
@@ -337,12 +338,16 @@ class DiPlayActivity : ComponentActivity() {
         }
         card.addView(connectButton, matchButton())
         val connectionHint = when (AirPlayPersistence.loadWirelessHotspotMode(this)) {
-            WirelessHotspotMode.MANUAL -> getString(R.string.hotspot_hint_manual)
+            WirelessHotspotMode.MANUAL -> getString(if (usesGeelyFactoryHotspot()) {
+                R.string.geely_factory_hotspot_hint
+            } else {
+                R.string.hotspot_hint_manual
+            })
             WirelessHotspotMode.LOCAL_ONLY_HOTSPOT -> getString(R.string.hotspot_hint_local)
             else -> getString(R.string.hotspot_hint_p2p)
         }
         card.addView(label(connectionHint, 15, MUTED).apply { setPadding(0, dp(14), 0, 0) })
-        if (carHotspotOff()) {
+        if (!usesGeelyFactoryHotspot() && carHotspotOff()) {
             card.addView(label(getString(R.string.msg_car_hotspot_off, AirPlayPersistence.loadManualHotspotSsid(this)), 15, WARNING).apply { setPadding(0, dp(14), 0, 0) })
             card.addView(button(getString(R.string.open_car_hotspot_settings), false) { openCarWifiSettings() }, matchButton(10, 56))
         }
@@ -438,7 +443,12 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(label(destination + getString(R.string.nothing_is_sent_automatically_protocol_payloads_and_creden), 14, MUTED).apply { setPadding(0, dp(12), 0, 0) })
         }
         section(content, getString(R.string.automatic_connection), R.drawable.ic_dp_automation) { card ->
-            toggle(card, getString(R.string.connect_when_diplay_opens), getString(R.string.use_your_last_connection_type_and_selected_iphone), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
+            val autoConnectHint = if (GeelyFactoryHotspot.enabled(this)) {
+                R.string.geely_wifi_auto_connect_hint
+            } else {
+                R.string.use_your_last_connection_type_and_selected_iphone
+            }
+            toggle(card, getString(R.string.connect_when_diplay_opens), getString(autoConnectHint), DiPlayPreferences.autoConnect(this)) { DiPlayPreferences.saveAutoConnect(this, it) }
             toggle(card, getString(R.string.open_after_the_car_starts), getString(R.string.availability_depends_on_your_head_unit_s_startup_settings), AirPlayPersistence.loadAutoStartOnBoot(this)) { AirPlayPersistence.saveAutoStartOnBoot(this, it) }
             card.addView(button(selectedPhoneButtonLabel(), false) { choosePhone() }, matchButton(12, 60))
         }
@@ -680,6 +690,10 @@ class DiPlayActivity : ComponentActivity() {
             card.addView(label(getString(R.string.receiver_based_on_xcertplay_licensed_under_gpl_3_0_diplay), 16, MUTED))
         }
     }
+
+    private fun usesGeelyFactoryHotspot(): Boolean =
+        GeelyFactoryHotspot.enabled(this) &&
+            AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL
 
     // The cached AP state is refreshed on a background worker; connection checks stay on the UI thread.
     private fun carHotspotOff(): Boolean =
@@ -1330,9 +1344,10 @@ class DiPlayActivity : ComponentActivity() {
             refreshStatus()
             return
         }
-        if (wireless && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
+        val useFactoryHotspot = wireless && usesGeelyFactoryHotspot()
+        if (wireless && !useFactoryHotspot && pendingCarHotspotSetup) { toast(getString(R.string.save_your_hotspot_details_in_connection_setup_first)); page = "connection"; render(); return }
         if (setupError != null) { toast(setupError!!); return }
-        if (wireless && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
+        if (wireless && !useFactoryHotspot && AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL &&
             hotspotError(storedSsid(), storedPassword()) != null) {
             pendingCarHotspotSetup = true
             page = "connection"
@@ -1340,7 +1355,7 @@ class DiPlayActivity : ComponentActivity() {
             toast(getString(R.string.save_the_name_and_password_from_the_car_s_hotspot_settings))
             return
         }
-        if (wireless && carHotspotOff()) { carHotspotOffDialog(); return }
+        if (wireless && !useFactoryHotspot && carHotspotOff()) { carHotspotOffDialog(); return }
         val useGeelyBluetooth = AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this)
         if (wireless && !DiPlayPreferences.phoneSelectedForTransport(this, useGeelyBluetooth)) {
             pendingWireless = true; choosePhone(); return

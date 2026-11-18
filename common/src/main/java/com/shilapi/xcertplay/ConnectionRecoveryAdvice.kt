@@ -41,6 +41,9 @@ internal object ConnectionRecoveryAdvice {
             error.contains("usb configuration changed or could not be confirmed") -> Advice(
                 "USBMUX 打开后未确认相同的 USB 配置，本次没有再次切换配置。请重新插拔 iPhone 并重试，保存报告检查是否发生重枚举或其他应用占用。",
                 "The USB configuration was not confirmed after USBMUX opened. Reconnect the iPhone and save the report; configuration was not reset underneath the session.")
+            error.contains("geely factory hotspot failed") -> Advice(
+                "请在原车设置确认热点配置可用并尝试手动开启，然后返回重试。若仍失败，请记录界面上的失败阶段并保存报告。",
+                "Check the hotspot configuration in factory settings and try starting it there. Return to DiPlay and retry. If it still fails, note the failed stage and save a report.")
             error.contains("the car hotspot is off") -> Advice(
                 "请在 DiPlay 热点设置或车机原厂界面开启车机热点，再点击“读取车机热点信息”并重试。WiFi 客户端开启不等于热点开启。",
                 "Enable the car hotspot in DiPlay or the factory settings, read its configuration, and retry. Client Wi-Fi being on does not mean the hotspot is on.")

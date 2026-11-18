@@ -2,6 +2,8 @@
     <string name="built_in_car_hotspot">车机热点</string>
     <string name="wifi_direct">Wi-Fi 直连</string>
     <string name="hotspot_hint_manual">车机热点 · 保持车机热点、蓝牙和 iPhone 的 Wi-Fi 开启。</string>
+    <string name="geely_factory_hotspot_hint">连接时自动开启原车热点，车机可能会断开当前接入的 Wi-Fi。</string>
+    <string name="geely_wifi_auto_connect_hint">打开 DiPlay 时，自动尝试无线连接已选的 iPhone。</string>
     <string name="hotspot_hint_local">打开“连接设置”以保存车机热点信息。</string>
     <string name="hotspot_hint_p2p">Wi-Fi 直连 · 车机创建网络，iPhone 自动加入。请保持车机 Wi-Fi、蓝牙和 iPhone Wi-Fi 开启。</string>
     <string name="cluster_size_standard">标准 · 最清晰</string>

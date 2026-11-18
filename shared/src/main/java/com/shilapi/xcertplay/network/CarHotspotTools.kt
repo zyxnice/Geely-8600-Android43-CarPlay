@@ -5,6 +5,7 @@ import android.content.Context
 import android.net.wifi.WifiConfiguration
 import android.net.wifi.WifiManager
 import android.os.SystemClock
+import android.util.Log
 import com.shilapi.xcertplay.compat.systemService
 import com.shilapi.xcertplay.orchestration.ManualHotspotBand
 import com.shilapi.xcertplay.orchestration.ManualHotspotSecurity
@@ -46,6 +47,21 @@ object CarHotspotTools {
     ): CarHotspotStartResult = start(
         androidAccess(context), timeoutMillis, pollIntervalMillis, pause, cancelled,
     )
+
+    @Synchronized
+    internal fun startGeelyFactory(context: Context, cancelled: () -> Boolean): CarHotspotStartResult {
+        if (!GeelyFactoryHotspot.enabled(context)) {
+            return CarHotspotStartResult.Failure(CarHotspotFailure.OPERATION_FAILED)
+        }
+        return try {
+            start(
+                androidAccess(context, useSavedGeelyAp = true, cancelled = cancelled),
+                DEFAULT_START_TIMEOUT_MILLIS, DEFAULT_POLL_INTERVAL_MILLIS, Thread::sleep, cancelled,
+            )
+        } catch (error: Exception) {
+            CarHotspotStartResult.Failure(error.toHotspotFailure())
+        }
+    }
 
     internal fun read(access: CarHotspotWifiAccess): CarHotspotReadResult {
         return try {
@@ -193,6 +209,7 @@ object CarHotspotTools {
             } catch (_: Throwable) {
                 return CarHotspotStartResult.Failure(CarHotspotFailure.OPERATION_FAILED)
             }
+            if (cancelled()) return CarHotspotStartResult.Failure(CarHotspotFailure.OPERATION_CANCELLED)
 
             val state = try {
                 access.readState()?.let(::stateFromRaw)
@@ -214,11 +231,15 @@ object CarHotspotTools {
         return CarHotspotStartResult.Failure(CarHotspotFailure.START_TIMED_OUT)
     }
 
-    private fun androidAccess(context: Context): CarHotspotWifiAccess {
+    private fun androidAccess(
+        context: Context,
+        useSavedGeelyAp: Boolean = false,
+        cancelled: () -> Boolean = { false },
+    ): CarHotspotWifiAccess {
         val appContext = context.applicationContext
         val manager = appContext.systemService(WifiManager::class.java, "wifi")
             ?: throw IllegalStateException("Wi-Fi service unavailable")
-        return AndroidCarHotspotWifiAccess(manager)
+        return AndroidCarHotspotWifiAccess(manager, useSavedGeelyAp, cancelled)
     }
 
     private fun Throwable.toHotspotFailure(): CarHotspotFailure {
@@ -292,11 +313,20 @@ internal interface CarHotspotWifiAccess {
 @SuppressLint("PrivateApi")
 private class AndroidCarHotspotWifiAccess(
     private val wifiManager: WifiManager,
+    private val useSavedGeelyAp: Boolean,
+    private val cancelled: () -> Boolean,
 ) : CarHotspotWifiAccess {
     override fun readConfiguration(): CarHotspotConfiguration? {
         val native = WifiManager::class.java.getMethod("getWifiApConfiguration").invoke(wifiManager)
             as? WifiConfiguration ?: return null
-        return CarHotspotTools.configurationFrom(native)
+        val configuration = CarHotspotTools.configurationFrom(native) ?: return null
+        if (useSavedGeelyAp && (
+                configuration.ssid.toByteArray().size > 32 || '\u0000' in configuration.ssid ||
+                    '\u0000' in configuration.passphrase ||
+                    (configuration.security != ManualHotspotSecurity.OPEN && configuration.passphrase.length !in 8..63)
+            )
+        ) throw CarHotspotConfigurationException(CarHotspotFailure.UNSUPPORTED_CONFIGURATION)
+        return configuration
     }
 
     override fun readState(): Int? {
@@ -309,13 +339,48 @@ private class AndroidCarHotspotWifiAccess(
         return if (enabled) CarHotspotTools.AOSP_STATE_ENABLED else CarHotspotTools.AOSP_STATE_DISABLED
     }
 
+    @Suppress("DEPRECATION")
     override fun requestEnable(configuration: CarHotspotConfiguration): Boolean {
         val method = WifiManager::class.java.getMethod(
             "setWifiApEnabled",
             WifiConfiguration::class.java,
             java.lang.Boolean.TYPE,
         )
-        return method.invoke(wifiManager, configuration.nativeConfiguration, true) as? Boolean ?: false
+        if (!useSavedGeelyAp) {
+            return method.invoke(wifiManager, configuration.nativeConfiguration, true) == true
+        }
+        val stationState = wifiManager.wifiState
+        return requestGeelySavedAp(
+            stationActive = stationState == WifiManager.WIFI_STATE_ENABLED ||
+                stationState == WifiManager.WIFI_STATE_ENABLING,
+            cancelled = cancelled,
+            setStationEnabled = wifiManager::setWifiEnabled,
+            // H53 Settings supplies null: the framework uses the saved profile without replacing it.
+            enableSavedAp = { method.invoke(wifiManager, null, true) == true },
+            restoreFailure = { Log.w("DiPlayGeelyWifi", "Station Wi-Fi could not be restored after rejected AP request") },
+        )
     }
 
+}
+
+/** H53's active STA state does not process CMD_SET_AP; queue STA off first as Settings does. */
+internal fun requestGeelySavedAp(
+    stationActive: Boolean,
+    cancelled: () -> Boolean,
+    setStationEnabled: (Boolean) -> Boolean,
+    enableSavedAp: () -> Boolean,
+    restoreFailure: () -> Unit,
+): Boolean {
+    if (cancelled()) return false
+    val stationDisabled = stationActive && setStationEnabled(false)
+    if (stationActive && !stationDisabled) return false
+    var accepted = false
+    try {
+        if (!cancelled()) accepted = enableSavedAp()
+        return accepted
+    } finally {
+        if (stationDisabled && !accepted && !runCatching { setStationEnabled(true) }.getOrDefault(false)) {
+            restoreFailure()
+        }
+    }
 }

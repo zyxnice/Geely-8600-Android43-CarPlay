@@ -8,6 +8,7 @@ internal class SessionLogFile(val file: File) : Closeable {
     private val lock = Any()
     private var closed = false
     fun reset(header: String) = synchronized(lock) {
+        if (!com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) return@synchronized
         if (!closed) {
             file.parentFile?.mkdirs()
             rotate()
@@ -16,6 +17,7 @@ internal class SessionLogFile(val file: File) : Closeable {
         }
     }
     fun append(line: String) = synchronized(lock) {
+        if (!com.shilapi.xcertplay.compat.RuntimeDiagnostics.enabled()) return@synchronized
         if (closed) return@synchronized
         val safe = DiagnosticRedactor.redact(line) ?: return@synchronized
         runCatching {

@@ -2,6 +2,8 @@
     <string name="built_in_car_hotspot">Built-in car hotspot</string>
     <string name="wifi_direct">Wi-Fi Direct</string>
     <string name="hotspot_hint_manual">Built-in car hotspot · Keep the car hotspot, Bluetooth and your iPhone’s Wi-Fi on.</string>
+    <string name="geely_factory_hotspot_hint">DiPlay starts the car hotspot when connecting. This can disconnect the car from its current Wi-Fi network.</string>
+    <string name="geely_wifi_auto_connect_hint">Start wireless CarPlay with the selected iPhone when DiPlay opens.</string>
     <string name="hotspot_hint_local">Open Connection setup to save your built-in car hotspot details.</string>
     <string name="hotspot_hint_p2p">Wi-Fi Direct · Keep the car’s Wi-Fi switch, Bluetooth and your iPhone’s Wi-Fi on.</string>
     <string name="cluster_size_standard">Standard · sharpest</string>

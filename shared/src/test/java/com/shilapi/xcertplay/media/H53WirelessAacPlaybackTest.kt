@@ -74,4 +74,50 @@ class H53WirelessAacPlaybackTest {
         assertFalse(progress.shouldRebuffer(true, true, false, true, 1023, allowHeadOnly = true))
         assertTrue(progress.shouldRebuffer(true, true, false, true, 1024, allowHeadOnly = true))
     }
+
+    @Test fun feedbackHoldsAtDrainedHeadUntilNewPcmActuallyPlays() {
+        val clock = PlaybackHeadRtpClock()
+        clock.recordWrite(0, 512, 1024)
+        clock.recordWrite(512, 512, 1536)
+        clock.advance(0)
+        assertNull(clock.rtpSample())
+
+        clock.advance(960)
+        assertEquals(1984L, clock.rtpSample())
+        clock.advance(1024)
+        assertEquals(2048L, clock.rtpSample())
+
+        // Packets were missed. The newly written PCM is prebuffered while the head is paused.
+        clock.recordWrite(1024, 1024, 8192)
+        clock.advance(1024)
+        assertEquals(2048L, clock.rtpSample())
+        clock.advance(1025)
+        assertEquals(8193L, clock.rtpSample())
+    }
+
+    @Test fun feedbackHasIndependentUnsignedTrackAndRtpWraps() {
+        val clock = PlaybackHeadRtpClock()
+        val wrap = 1L shl 32
+        clock.recordWrite(wrap - 8, 8, wrap - 3)
+        clock.recordWrite(wrap, 8, 5)
+        clock.advance(-2)
+        assertEquals(wrap - 2, clock.playedFrames)
+        assertEquals(3L, clock.rtpSample())
+        clock.advance(4)
+        assertEquals(wrap + 4, clock.playedFrames)
+        assertEquals(9L, clock.rtpSample())
+        // A head read can catch AudioTrack before the blocking write has published its mapping.
+        clock.advance(12)
+        assertEquals(wrap + 8, clock.playedFrames)
+        assertEquals(13L, clock.rtpSample())
+    }
+
+    @Test fun codecPtsPreservesTheInputRtpSampleAtBothSupportedRates() {
+        for (rate in listOf(44_100, 48_000)) {
+            for (sample in listOf(0L, 1L, 1024L, 0xffff_ffffL)) {
+                val ptsUs = sample * 1_000_000L / rate
+                assertEquals(sample, PlaybackHeadRtpClock.sampleFromPts(ptsUs, rate))
+            }
+        }
+    }
 }

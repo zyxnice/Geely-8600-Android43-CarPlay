@@ -13,6 +13,7 @@ import android.view.Surface
 import androidx.annotation.RequiresApi
 import com.shilapi.xcertplay.airplay.AudioCodecKind
 import com.shilapi.xcertplay.airplay.AudioFormat
+import com.shilapi.xcertplay.airplay.AudioPlaybackPosition
 import com.shilapi.xcertplay.airplay.AudioStreamId
 import com.shilapi.xcertplay.airplay.MediaSink
 import com.shilapi.xcertplay.airplay.MicrophoneConfig
@@ -493,6 +494,9 @@ class AndroidMediaSink(
         audioRenderer(id, format).start()
         if (format.audioType == "media") updateMediaAudio(id, true)
     }
+
+    override fun audioPlaybackPositionSource(id: AudioStreamId): (() -> AudioPlaybackPosition?)? =
+        audioRenderers[id]?.playbackPositionSource()
 
     override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {
         audioRenderer(id, format).submit(rtp, sample)
@@ -1185,6 +1189,7 @@ private class AudioRenderer(
     private var mappedChannel: AudioChannel? = null
     private val queue = LinkedBlockingQueue<AudioPacket>(MAX_QUEUED_PACKETS)
     private val h53WirelessAac = usesH53WirelessAac(h53WirelessAacEnabled, format)
+    private val playbackClock = if (h53WirelessAac) PlaybackHeadRtpClock() else null
     // Only the audio worker uses this storage; writePcm completes before the next packet.
     private val aacDiagnostics = if (h53WirelessAac && RuntimeDiagnostics.enabled()) {
         AacDecodeDiagnostics(inspectSamples = false)
@@ -1196,7 +1201,7 @@ private class AudioRenderer(
     @Volatile private var started = false
     private var codec: MediaCodec? = null
     private var softwareOpus: LegacyOpusDecoder? = null
-    private var track: AudioTrack? = null
+    @Volatile private var track: AudioTrack? = null
     private var pcm = ByteArray(64 * 1024)
     private var playbackStarted = false
     private var prebufferBytes = 0
@@ -1236,6 +1241,18 @@ private class AudioRenderer(
         if (started) return
         started = true
         thread.start()
+    }
+
+    fun playbackPositionSource(): (() -> AudioPlaybackPosition?)? {
+        val clock = playbackClock ?: return null
+        return {
+            synchronized(clock) {
+                // Track release detaches under the same lock. Writes do not hold this lock.
+                track?.let { clock.advance(it.playbackHeadPosition) }
+                val sampledAtNs = System.nanoTime()
+                clock.rtpSample()?.let { AudioPlaybackPosition(it, clock.playedFrames, sampledAtNs) }
+            }
+        }
     }
 
     fun submit(rtp: ByteArray, sample: Int) {
@@ -1760,8 +1777,9 @@ private class AudioRenderer(
                             codec.releaseOutputBuffer(index, false)
                         }
                         if (copied) {
-                            aacDiagnostics?.pcm(pcm, 0, size, info.presentationTimeUs)
-                            writePcm(pcm, 0, size)
+                            val ptsUs = info.presentationTimeUs
+                            aacDiagnostics?.pcm(pcm, 0, size, ptsUs)
+                            writePcm(pcm, 0, size, rtpSample = PlaybackHeadRtpClock.sampleFromPts(ptsUs, format.sampleRate))
                         }
                         if (info.flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0) return
                         continue
@@ -1787,7 +1805,7 @@ private class AudioRenderer(
         }
     }
 
-    private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size) {
+    private fun writePcm(data: ByteArray, offset: Int = 0, length: Int = data.size, rtpSample: Long? = null) {
         val track = track ?: return
         if (RuntimeDiagnostics.enabled() && (!firstPcmLogged && length > 0)) {
             firstPcmLogged = true
@@ -1825,8 +1843,16 @@ private class AudioRenderer(
                 break
             }
             if (count < writeLength) partialWritesThisWindow++
-            written += count
             val framesWritten = count / frameBytes
+            val clock = playbackClock
+            if (clock != null && rtpSample != null && framesWritten > 0) {
+                synchronized(clock) {
+                    if (clock.recordWrite(totalWrittenFrames, framesWritten, rtpSample + written / frameBytes)) {
+                        clock.advance(track.playbackHeadPosition)
+                    }
+                }
+            }
+            written += count
             totalWrittenFrames += framesWritten
             writtenFramesThisWindow += framesWritten
             bufferProgress.written(count)
@@ -1971,8 +1997,7 @@ private class AudioRenderer(
                 // Best effort.
             }
         }
-        val track = track
-        this.track = null
+        val track = synchronized(playbackClock ?: this) { this.track.also { this.track = null } }
         if (track != null) {
             try {
                 track.pause()

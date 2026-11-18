@@ -14,6 +14,9 @@ import java.util.concurrent.ConcurrentHashMap
 /** Identity of one CarPlay audio stream: the stream type plus its CarPlay audio type. */
 data class AudioStreamId(val type: Int, val audioType: String)
 
+/** RTP position at the playback head, sampled on the receiver's monotonic clock. */
+data class AudioPlaybackPosition(val rtpSample: Long, val playedFrames: Long, val sampledAtNs: Long)
+
 /** Rendering seam for the decrypted CarPlay media streams. */
 interface MediaSink {
     fun onVideoCodec(type: Int, codec: VideoCodec) {}
@@ -29,6 +32,8 @@ interface MediaSink {
     fun setVideoDiagnosticHandler(type: Int, handler: (String) -> Unit) {}
     fun onScreenStreamActive(type: Int, active: Boolean) {}
     fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) {}
+    /** Bind to the renderer just started for this stream. Null means the legacy clock applies. */
+    fun audioPlaybackPositionSource(id: AudioStreamId): (() -> AudioPlaybackPosition?)? = null
     fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {}
     fun onAudioStopped(id: AudioStreamId) {}
     fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {}
@@ -57,9 +62,14 @@ class CarPlayMediaEngine(
         val format: AudioFormat,
         val connectionId: Any?,
         val playoutLatencyMs: Int,
-        @Volatile var firstSample: Int? = null,
-        @Volatile var originNs: Long? = null,
+        @Volatile var start: AudioStart? = null,
         @Volatile var nextFeedbackLogNs: Long = Long.MIN_VALUE,
+    )
+
+    private data class AudioStart(
+        val firstSample: Int,
+        val originNs: Long,
+        val playbackPosition: (() -> AudioPlaybackPosition?)?,
     )
 
     private data class PendingIapTunnel(
@@ -183,9 +193,9 @@ class CarPlayMediaEngine(
         val (dataPort, controlPort) = audio.listen(
             object : AudioStream.Listener {
                 override fun onStarted(firstSample: Int) {
-                    meta.firstSample = firstSample
-                    meta.originNs = System.nanoTime()
+                    val originNs = System.nanoTime()
                     sink.onAudioStarted(streamId, format, firstSample)
+                    meta.start = AudioStart(firstSample, originNs, sink.audioPlaybackPositionSource(streamId))
                     microphone?.let { sink.onMicrophoneStarted(streamId, it) }
                 }
 
@@ -317,33 +327,48 @@ class CarPlayMediaEngine(
     }
 
     override fun onFeedback(session: AirPlaySession): Map<String, Any?>? {
-        val active = audioMeta.values.toList()
+        val active = audioMeta.entries.filter { it.key.session === session }.map { it.value }
         if (active.isEmpty()) return null
         val streams = active.map { meta ->
             val entry = linkedMapOf<String, Any?>(
                 "type" to meta.type,
                 "sampleRate" to meta.format.sampleRate,
             )
-            val firstSample = meta.firstSample
-            val originNs = meta.originNs
-            if (firstSample != null && originNs != null) {
-                val nowNs = System.nanoTime()
+            val start = meta.start
+            if (start != null) {
+                val position = start.playbackPosition?.invoke()
+                val nowNs = position?.sampledAtNs ?: System.nanoTime()
                 val elapsedSec = Math.max(
                     0.0,
-                    (nowNs - originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
+                    (nowNs - start.originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
                 )
-                val firstUnsigned = firstSample.toLong() and 0xffff_ffffL
-                val sampleTime = (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and
+                val firstUnsigned = start.firstSample.toLong() and 0xffff_ffffL
+                val legacySample = (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and
                     0xffff_ffffL
+                val sampleTime = when {
+                    position != null -> position.rtpSample
+                    start.playbackPosition != null -> firstUnsigned // PCM has not reached the playback head yet.
+                    else -> legacySample
+                }
                 entry["streamConnectionID"] = unsignedPlistInteger(meta.connectionId ?: 0L)
                 entry["timestamp"] = session.syncedNtp()
                 entry["timestampRawNs"] = nowNs
                 entry["sampleTime"] = sampleTime
-                if (meta.type == 102 && meta.format.audioType == "media" && nowNs >= meta.nextFeedbackLogNs) {
+                if (meta.type == 102 && meta.format.audioType == "media" &&
+                    (start.playbackPosition != null || nowNs >= meta.nextFeedbackLogNs)
+                ) {
                     meta.nextFeedbackLogNs = nowNs + 5_000_000_000L
+                    val source = when {
+                        position != null -> "playback_head"
+                        start.playbackPosition != null -> "awaiting_playback"
+                        else -> "legacy"
+                    }
                     Log.i("DiPlay-AAC", "AAC: event=feedback_timing sampledAtNs=$nowNs " +
                         "rate=${meta.format.sampleRate} firstRtpSample=$firstUnsigned " +
-                        "feedbackRtpSample=$sampleTime negotiatedLatencyMs=${meta.playoutLatencyMs}")
+                        "feedbackRtpSample=$sampleTime negotiatedLatencyMs=${meta.playoutLatencyMs} " +
+                        "legacyRtpSample=$legacySample feedbackSource=$source " +
+                        "playbackHeadFrames=${position?.playedFrames ?: -1L} " +
+                        "streamConnectionID=${unsignedPlistDecimal(meta.connectionId ?: 0L)}")
                 }
             }
             entry

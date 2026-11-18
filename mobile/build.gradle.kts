@@ -29,8 +29,8 @@ android {
         // API 18 predates native multidex; keep the launcher installable on 4.3.
         multiDexEnabled = true
         targetSdk = 37
-        versionCode = 29
-        versionName = "0.2.10"
+        versionCode = 30
+        versionName = "1.1.0"
 
     }
 
@@ -65,9 +65,9 @@ android {
             if (geelyWifiLogComparison) isDebuggable = false
             applicationIdSuffix = ".repair1.geely8600"
             versionNameSuffix = when {
-                geelyWifiQuiet -> "-H53-1.0-DIAG-NOLOG-20261118"
-                geelyWifiLogComparison -> "-H53-1.0-DIAG-LOG-20261118"
-                geelyWifiTrial -> "-H53-1.0-DIAG-20261118"
+                geelyWifiQuiet -> "-H53-NOLOG"
+                geelyWifiLogComparison -> "-H53-LOG"
+                geelyWifiTrial -> "-H53"
                 geelyPerformanceStage == "off" -> "-H53-USB2"
                 else -> "-H53-USB3-$geelyPerformanceStage"
             }
@@ -75,7 +75,7 @@ android {
             manifestPlaceholders["geelyWifiTrial"] = geelyWifiTrial
             if (geelyWifiQuiet) proguardFiles("wifi-quiet.pro")
             manifestPlaceholders["geelyTestLabel"] = if (geelyWifiTrial) {
-                "DiPlay 8600 1.0诊断版"
+                "DiPlay 8600 1.1"
             } else {
                 "@string/geely_usb_app_name"
             }

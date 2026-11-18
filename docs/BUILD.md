@@ -4,11 +4,11 @@
 
 ## 8600 车测变体
 
-2026-11-18 主线已合入 [1.0 诊断功能](DIAGNOSTIC-INTEGRATION-20261118.md)。
+2026-11-18 主线以 [1.1](RELEASE-1.1-20261118.md) 发布已合入的 [1.0 诊断功能](DIAGNOSTIC-INTEGRATION-20261118.md)。
 `geelyUsb` 默认启用 `geelyWifiTrial=true` 和对应 LOG 构建，版本字段为
-`0.2.10-H53-1.0-DIAG-LOG-20261118`。下述 `-PgeelyPerformanceStage=B` 命令可直接构建集成版。
+`1.1.0-H53-LOG` / versionCode 30。下述 `-PgeelyPerformanceStage=B` 命令可直接构建 1.1。
 这两个属性是已有试验构建命令的兼容入口，功能在运行时仍匹配指定 H53 设备和无线会话。
-需要原 USB 构建配置时显式传入 `-PgeelyWifiTrial=false`，日志对照属性随之默认关闭。
+需要关闭无线试验、使用原 USB 功能配置时显式传入 `-PgeelyWifiTrial=false`，日志对照属性随之默认关闭；版本仍为 1.1.0，后缀随 USB 配置选择，不能将其视为原始 1.0 APK。
 `-PgeelyWifiQuiet=true` 使用 NOLOG 构建，可用 `scripts/verify-geely-quiet-apk.py` 对实际 APK 核查日志裁剪。
 以下 2026-11-13 的开关撤回描述属于原始 1.0 发布记录。
 
@@ -64,7 +64,7 @@ main 合入 `milestone/usb-smooth-userspace-ncm-20261108`，保留已归档的�
 .\gradlew.bat :shared:testDebugUnitTest :common:testDebugUnitTest :mobile:assembleGeelyUsb
 ```
 
-普通构建未指定本地认证资产时，产物不具备独立连接手机所需的身份。需要车测时，先在本地将 `DIPLAY_AUTH_ASSETS_DIR` 指向已授权的认证资产目录，再构建；不得将认证文件提交到仓库。基础变体版本后缀为 `-H53-USB2`，可通过 `-PgeelyPerformanceStage=B` 选择 USB3-B 变体；A/B/C 是候选实现标识，不代表验收等级，未指定时为 `off`。
+普通构建未指定本地认证资产时，产物不具备独立连接手机所需的身份。已有设备覆盖包保留运行时认证身份；独立认证车测才在本地将 `DIPLAY_AUTH_ASSETS_DIR` 指向已授权的认证资产目录，再构建，不得将认证文件提交到仓库。1.1 默认版本后缀为 `-H53-LOG`；仅在关闭无线试验时，基础后缀为 `-H53-USB2`，或通过 `-PgeelyPerformanceStage=B` 选择 USB3-B 后缀。A/B/C 是候选实现标识，不代表验收等级，未指定时为 `off`。
 
 产物目录为 `mobile/build/outputs/apk/geelyUsb/`。交付前核对 APK 中的包名、版本、签名、API18/ARMv7 兼容与所选本地认证输入。覆盖安装要求包名和签名一致；发布包及校验值以[本仓库 Releases](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases)说明为准。
 

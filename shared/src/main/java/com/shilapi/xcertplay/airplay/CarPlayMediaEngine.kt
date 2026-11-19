@@ -15,7 +15,12 @@ import java.util.concurrent.ConcurrentHashMap
 data class AudioStreamId(val type: Int, val audioType: String)
 
 /** RTP position at the playback head, sampled on the receiver's monotonic clock. */
-data class AudioPlaybackPosition(val rtpSample: Long, val playedFrames: Long, val sampledAtNs: Long)
+data class AudioPlaybackPosition(
+    val rtpSample: Long,
+    val playedFrames: Long,
+    val sampledAtNs: Long,
+    val diagnosticStreamId: String? = null,
+)
 
 /** Rendering seam for the decrypted CarPlay media streams. */
 interface MediaSink {
@@ -34,6 +39,7 @@ interface MediaSink {
     fun onAudioStarted(id: AudioStreamId, format: AudioFormat, firstSample: Int) {}
     /** Bind to the renderer just started for this stream. Null means the legacy clock applies. */
     fun audioPlaybackPositionSource(id: AudioStreamId): (() -> AudioPlaybackPosition?)? = null
+    fun onAudioFeedbackDiagnostic(message: String) {}
     fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {}
     fun onAudioStopped(id: AudioStreamId) {}
     fun onMicrophoneStarted(id: AudioStreamId, config: MicrophoneConfig) {}
@@ -64,6 +70,7 @@ class CarPlayMediaEngine(
         val playoutLatencyMs: Int,
         @Volatile var start: AudioStart? = null,
         @Volatile var nextFeedbackLogNs: Long = Long.MIN_VALUE,
+        @Volatile var latestReceivedRtpSample: Long = -1L,
     )
 
     private data class AudioStart(
@@ -199,8 +206,16 @@ class CarPlayMediaEngine(
                     microphone?.let { sink.onMicrophoneStarted(streamId, it) }
                 }
 
-                override fun onRtp(rtp: ByteArray, sample: Int) =
+                override fun onRtp(rtp: ByteArray, sample: Int) {
+                    if (meta.start?.playbackPosition != null) {
+                        val previous = meta.latestReceivedRtpSample
+                        // Keep the newest decrypted packet in RTP order, including 32-bit wrap.
+                        if (previous == -1L || sample - previous.toInt() > 0) {
+                            meta.latestReceivedRtpSample = sample.toLong() and 0xffff_ffffL
+                        }
+                    }
                     sink.onAudioRtp(streamId, format, rtp, sample)
+                }
 
                 override fun onPacket(
                     wire: ByteArray,
@@ -336,6 +351,7 @@ class CarPlayMediaEngine(
             )
             val start = meta.start
             if (start != null) {
+                val latestReceived = meta.latestReceivedRtpSample
                 val position = start.playbackPosition?.invoke()
                 val nowNs = position?.sampledAtNs ?: System.nanoTime()
                 val elapsedSec = Math.max(
@@ -363,12 +379,21 @@ class CarPlayMediaEngine(
                         start.playbackPosition != null -> "awaiting_playback"
                         else -> "legacy"
                     }
-                    Log.i("DiPlay-AAC", "AAC: event=feedback_timing sampledAtNs=$nowNs " +
+                    val streamTag = position?.diagnosticStreamId?.let { "stream=$it " }.orEmpty()
+                    val rxAheadMs = if (latestReceived >= 0L) {
+                        ((latestReceived - sampleTime).toInt() * 1000L / meta.format.sampleRate).toString()
+                    } else "unknown"
+                    val legacyAheadMs = (legacySample - sampleTime).toInt() * 1000L / meta.format.sampleRate
+                    val line = "AAC: ${streamTag}event=feedback_timing sampledAtNs=$nowNs " +
                         "rate=${meta.format.sampleRate} firstRtpSample=$firstUnsigned " +
                         "feedbackRtpSample=$sampleTime negotiatedLatencyMs=${meta.playoutLatencyMs} " +
                         "legacyRtpSample=$legacySample feedbackSource=$source " +
                         "playbackHeadFrames=${position?.playedFrames ?: -1L} " +
-                        "streamConnectionID=${unsignedPlistDecimal(meta.connectionId ?: 0L)}")
+                        "streamConnectionID=${unsignedPlistDecimal(meta.connectionId ?: 0L)} " +
+                        "latestReceivedRtpSample=$latestReceived rxAheadOfFeedbackMs=$rxAheadMs " +
+                        "legacyAheadOfFeedbackMs=$legacyAheadMs"
+                    Log.i("DiPlay-AAC", line)
+                    if (start.playbackPosition != null) sink.onAudioFeedbackDiagnostic(line)
                 }
             }
             entry

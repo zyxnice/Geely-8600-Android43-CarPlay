@@ -10,6 +10,7 @@ object MediaAudioBuffer {
     val presets = listOf(DEFAULT_MILLIS, 500, 1000)
 
     private const val HEADROOM_MILLIS = 200 // room above the start level so bursts after a gap fit
+    private const val H53_WIRELESS_CAPACITY_MILLIS = 520
     private const val MIN_TRACK_BUFFER_BYTES = 16 * 1024
     private const val MIN_START_BUFFER_BYTES = 4 * 1024
 
@@ -18,19 +19,31 @@ object MediaAudioBuffer {
     data class Plan(val trackBufferBytes: Int, val startBytes: Int)
 
     /** AudioTrack capacity and the amount to queue before play() for one output stream. */
-    fun plan(isMedia: Boolean, sampleRate: Int, channels: Int, minBufferBytes: Int, mediaMillis: Int): Plan {
+    fun plan(
+        isMedia: Boolean,
+        sampleRate: Int,
+        channels: Int,
+        minBufferBytes: Int,
+        mediaMillis: Int,
+        h53WirelessAac: Boolean = false,
+    ): Plan {
         val lowLatency = Plan(
             trackBufferBytes = maxOf(minBufferBytes * 4, MIN_TRACK_BUFFER_BYTES),
             startBytes = maxOf(minBufferBytes, MIN_START_BUFFER_BYTES),
         )
         if (!isMedia) return lowLatency
         val bytesPerSecond = sampleRate.toLong() * channels.coerceIn(1, 2) * 2
-        val start = (bytesPerSecond * sanitize(mediaMillis) / 1000).toInt()
-        val capacity = (bytesPerSecond * (sanitize(mediaMillis) + HEADROOM_MILLIS) / 1000).toInt()
-        return Plan(
-            trackBufferBytes = maxOf(capacity, lowLatency.trackBufferBytes),
-            startBytes = maxOf(start, lowLatency.startBytes),
-        )
+        val configuredMillis = sanitize(mediaMillis)
+        val configuredStartBytes = (bytesPerSecond * configuredMillis / 1000).toInt()
+        val startBytes = maxOf(configuredStartBytes, lowLatency.startBytes)
+        val capacityWithHeadroom = (bytesPerSecond * (configuredMillis + HEADROOM_MILLIS) / 1000).toInt()
+        val regularCapacity = maxOf(capacityWithHeadroom, lowLatency.trackBufferBytes)
+        val h53Capacity = (bytesPerSecond * H53_WIRELESS_CAPACITY_MILLIS / 1000).toInt()
+        // Apply the comparison only to the default H53 wireless AAC preset with room for bursts.
+        val capacity = if (h53WirelessAac && configuredMillis == DEFAULT_MILLIS &&
+            h53Capacity - startBytes >= capacityWithHeadroom - configuredStartBytes
+        ) minOf(regularCapacity, h53Capacity) else regularCapacity
+        return Plan(trackBufferBytes = capacity, startBytes = startBytes)
     }
 
     /**

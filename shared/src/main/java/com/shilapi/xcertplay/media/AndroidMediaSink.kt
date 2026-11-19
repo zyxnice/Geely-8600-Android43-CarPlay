@@ -498,6 +498,8 @@ class AndroidMediaSink(
     override fun audioPlaybackPositionSource(id: AudioStreamId): (() -> AudioPlaybackPosition?)? =
         audioRenderers[id]?.playbackPositionSource()
 
+    override fun onAudioFeedbackDiagnostic(message: String) = onAudioDiagnostic(message)
+
     override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {
         audioRenderer(id, format).submit(rtp, sample)
     }
@@ -1235,6 +1237,7 @@ private class AudioRenderer(
     private var underrunsAtPlaybackStart = 0
     private var lastPcmWriteNs = 0L
     private var rebufferCount = 0
+    private var rebufferStartedNs: Long? = null
     private val thread = Thread(::run, "carplay-audio").apply { isDaemon = true }
 
     fun start() {
@@ -1250,7 +1253,9 @@ private class AudioRenderer(
                 // Track release detaches under the same lock. Writes do not hold this lock.
                 track?.let { clock.advance(it.playbackHeadPosition) }
                 val sampledAtNs = System.nanoTime()
-                clock.rtpSample()?.let { AudioPlaybackPosition(it, clock.playedFrames, sampledAtNs) }
+                clock.rtpSample()?.let {
+                    AudioPlaybackPosition(it, clock.playedFrames, sampledAtNs, aacDiagnostics?.streamId)
+                }
             }
         }
     }
@@ -1379,7 +1384,7 @@ private class AudioRenderer(
         mappedChannel = selection.channel
         val streamOverride = channelOverride(selection.channel, format.audioType)
         val plan = MediaAudioBuffer.plan(selection.channel == AudioChannel.MEDIA,
-            format.sampleRate, format.channels, minBuffer, mediaBufferMillis)
+            format.sampleRate, format.channels, minBuffer, mediaBufferMillis, h53WirelessAac = h53WirelessAac)
         bytesPerSecond = format.sampleRate * frameBytes
         legacyTrackStreamType = AudioStreamRouting.legacyStreamType(selection.channel, streamOverride)
         trackAttributes = if (modernAudioSupported) {
@@ -1437,7 +1442,10 @@ private class AudioRenderer(
         startThresholdBytes = MediaAudioBuffer.startBytesFor(plan.startBytes, capacityBytes, PREBUFFER_WRITE_CHUNK_BYTES)
         reportAac { "event=track_plan configuredMs=$mediaBufferMillis " +
             "minMs=${minBuffer * 1000L / bytesPerSecond} capacityMs=${capacityBytes * 1000L / bytesPerSecond} " +
-            "startMs=${startThresholdBytes * 1000L / bytesPerSecond}" }
+            "startMs=${startThresholdBytes * 1000L / bytesPerSecond} " +
+            "requestedCapacityMs=${plan.trackBufferBytes * 1000L / bytesPerSecond} " +
+            "requestedTrackBytes=${plan.trackBufferBytes} measuredTrackFrames=$measuredFrames " +
+            "capacityKnown=${measuredFrames > 0} thresholdBytes=$startThresholdBytes rate=${format.sampleRate}" }
         if (h53WirelessAac) {
             report("Audio: wireless PCM buffer requestedTrackBytes=${plan.trackBufferBytes} " +
                 "measuredTrackFrames=$measuredFrames capacityKnown=${measuredFrames > 0} " +
@@ -1871,9 +1879,14 @@ private class AudioRenderer(
         underrunsAtPlaybackStart = PortableAudio.underrunCount(track)
         track.play()
         playbackStarted = true
-        reportAac { "event=track_play playState=${track.playState} prebufferBytes=$prebufferBytes " +
-            "thresholdBytes=$startThresholdBytes writtenFrames=$totalWrittenFrames rebuffers=$rebufferCount " +
-            aacDiagnostics?.startupTiming().orEmpty() }
+        reportAac {
+            val now = System.nanoTime()
+            val refillMs = rebufferStartedNs?.let { (now - it) / 1_000_000L } ?: -1
+            rebufferStartedNs = null
+            "event=track_play playState=${track.playState} prebufferBytes=$prebufferBytes " +
+                "thresholdBytes=$startThresholdBytes writtenFrames=$totalWrittenFrames rebuffers=$rebufferCount " +
+                "sampledAtNs=$now refillMs=$refillMs queue=${queue.size} " + aacDiagnostics?.startupTiming().orEmpty()
+        }
     }
 
     private fun maintainPlaybackBuffer() {
@@ -1888,8 +1901,18 @@ private class AudioRenderer(
             prebufferBytes = 0
             rebufferCount++
             if (h53WirelessAac) {
+                val headFrames = track.playbackHeadPosition
+                reportAac {
+                    val now = System.nanoTime()
+                    val lastRx = lastArrivalNs.get()
+                    rebufferStartedNs = now
+                    "event=rebuffer_begin sampledAtNs=$now rebuffers=$rebufferCount " +
+                        "playbackHeadFrames=${headFrames.toLong() and 0xffff_ffffL} totalWrittenFrames=$totalWrittenFrames " +
+                        "queue=${queue.size} sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} " +
+                        "maxRxGapMs=${maxArrivalGapMs.get()}"
+                }
                 report("Audio: wireless PCM buffer depleted rebuffers=$rebufferCount " +
-                    "headFrames=${track.playbackHeadPosition} writtenFrames=$totalWrittenFrames")
+                    "headFrames=$headFrames writtenFrames=$totalWrittenFrames")
             }
         }
         // A short final burst may never reach the start threshold. Play it after a bounded wait.
@@ -1916,15 +1939,17 @@ private class AudioRenderer(
             previous?.let { (current - it) and 0xffff_ffffL }
         }
         val queuedFrames = playbackHeadFrames?.let { (totalWrittenFrames - it).coerceAtLeast(0L) }
+        val received = packetsReceived.getAndSet(0)
+        val dropped = packetsDropped.getAndSet(0)
+        val maxRxGap = maxArrivalGapMs.getAndSet(0)
         val line = "audio stats audioType=${format.audioType} channel=$mappedChannel " +
             "routeType=${currentTrack?.let { PortableAudio.routedDeviceType(it) } ?: -1} codec=${format.codec} " +
             "decoder=${if (softwareOpus != null) "software-opus" else if (codec != null) "MediaCodec" else "pcm"} " +
             "trackState=${currentTrack?.state ?: -1} playState=${currentTrack?.playState ?: -1} " +
             "sampleRate=${currentTrack?.sampleRate ?: format.sampleRate} " +
             "trackBufferFrames=${currentTrack?.let { PortableAudio.bufferSizeInFrames(it) } ?: -1} " +
-            "rx=${packetsReceived.getAndSet(0)} " +
-            "dropped=${packetsDropped.getAndSet(0)} underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
-            "playing=$playbackStarted maxGapMs=${maxArrivalGapMs.getAndSet(0)} " +
+            "rx=$received dropped=$dropped underruns=+${underruns - statsLastUnderruns} queue=${queue.size} " +
+            "playing=$playbackStarted maxGapMs=$maxRxGap " +
             "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} maxWriteMs=$maxWriteMs " +
             "writtenFrames=$writtenFramesThisWindow totalWrittenFrames=$totalWrittenFrames " +
             "playbackHeadFrames=${playbackHeadFrames ?: -1} playbackAdvanceFrames=${playbackAdvanceFrames ?: -1} " +
@@ -1939,6 +1964,9 @@ private class AudioRenderer(
                 "queue=${queue.size} playState=${currentTrack?.playState ?: -1} " +
                 "pcmQueuedMs=${queuedFrames?.let { frames -> frames * 1000L / format.sampleRate } ?: -1} " +
                 "sinceRxMs=${if (lastRx == 0L) -1 else (now - lastRx) / 1_000_000L} " +
+                "rx=$received dropped=$dropped maxRxGapMs=$maxRxGap rebuffers=$rebufferCount " +
+                "totalWrittenFrames=$totalWrittenFrames playbackHeadFrames=${playbackHeadFrames ?: -1} " +
+                "estimatedQueuedFrames=${queuedFrames ?: -1} " +
                 "writtenFrames=$writtenFramesThisWindow playbackAdvanceFrames=${playbackAdvanceFrames ?: -1} " +
                 "maxWriteMs=$maxWriteMs writeErrors=$writeErrorsThisWindow zeroWrites=$zeroWritesThisWindow " +
                 "partialWrites=$partialWritesThisWindow underrunCounterAvailable=${Build.VERSION.SDK_INT >= 24} ended=$force" }

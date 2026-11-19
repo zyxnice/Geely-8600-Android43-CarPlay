@@ -62,9 +62,11 @@ class CarPlayAudioStreamIsolationTest {
 
     @Test fun feedbackUsesBoundPlaybackHeadAndHoldsWhileHeadIsUnchanged() {
         val arrived = CountDownLatch(1)
+        val feedbackDiagnostics = mutableListOf<String>()
         var position: AudioPlaybackPosition? = null
         val sink = object : MediaSink {
             override fun audioPlaybackPositionSource(id: AudioStreamId): () -> AudioPlaybackPosition? = { position }
+            override fun onAudioFeedbackDiagnostic(message: String) { feedbackDiagnostics += message }
             override fun onAudioRtp(id: AudioStreamId, format: AudioFormat, rtp: ByteArray, sample: Int) {
                 arrived.countDown()
             }
@@ -85,8 +87,11 @@ class CarPlayAudioStreamIsolationTest {
             fun feedbackEntry() = (engine.onFeedback(session)?.get("streams") as List<*>).single() as Map<*, *>
             assertEquals(3072L, feedbackEntry()["sampleTime"])
             val firstRead = System.nanoTime()
-            position = AudioPlaybackPosition(5120L, 1024L, firstRead)
+            position = AudioPlaybackPosition(5120L, 1024L, firstRead, "music-test")
             assertEquals(5120L, feedbackEntry()["sampleTime"])
+            val diagnostic = feedbackDiagnostics.last()
+            assertTrue(diagnostic.startsWith("AAC: stream=music-test event=feedback_timing "))
+            assertTrue(diagnostic.contains("latestReceivedRtpSample=3072 rxAheadOfFeedbackMs=-42"))
             position = AudioPlaybackPosition(5120L, 1024L, firstRead + 1_000_000_000L)
             val paused = feedbackEntry()
             assertEquals(5120L, paused["sampleTime"])

@@ -44,4 +44,26 @@ class MediaAudioBufferTest {
         assertEquals(57_600, MediaAudioBuffer.startBytesFor(57_600, 134_400, 2_048))
         assertEquals(57_600, MediaAudioBuffer.startBytesFor(57_600, 0, 2_048))
     }
+
+    @Test
+    fun `H53 wireless AAC default requests 520 ms without changing the start level`() {
+        for (rate in listOf(44_100, 48_000)) {
+            val bytesPerSecond = rate * 4
+            val systemMin = bytesPerSecond * 160 / 1000
+            val baseline = MediaAudioBuffer.plan(true, rate, 2, systemMin, mediaMillis = 300)
+            val trial = MediaAudioBuffer.plan(true, rate, 2, systemMin, 300, h53WirelessAac = true)
+            assertEquals(bytesPerSecond * 640 / 1000, baseline.trackBufferBytes)
+            assertEquals(bytesPerSecond * 520 / 1000, trial.trackBufferBytes)
+            assertEquals(baseline.startBytes, trial.startBytes)
+            assertEquals(trial.startBytes, MediaAudioBuffer.startBytesFor(trial.startBytes, trial.trackBufferBytes, 2048))
+        }
+    }
+
+    @Test
+    fun `H53 AAC preserves larger presets and system minimum with headroom`() {
+        for ((minimumBytes, preset) in listOf(30_720 to 500, 30_720 to 1000, 65_280 to 300)) {
+            val baseline = MediaAudioBuffer.plan(true, 48_000, 2, minimumBytes, preset)
+            assertEquals(baseline, MediaAudioBuffer.plan(true, 48_000, 2, minimumBytes, preset, h53WirelessAac = true))
+        }
+    }
 }

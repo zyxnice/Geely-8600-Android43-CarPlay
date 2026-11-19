@@ -1,6 +1,7 @@
 package com.shilapi.xcertplay.airplay
 
 import android.util.Log
+import com.shilapi.xcertplay.compat.RuntimeDiagnostics
 import com.shilapi.xcertplay.media.VideoFrameTrace
 import com.shilapi.xcertplay.transport.BlockingDuplexByteStream
 import java.io.Closeable
@@ -63,7 +64,7 @@ class CarPlayMediaEngine(
         val audioType: String = "",
     )
 
-    private data class AudioMeta(
+    private class AudioMeta(
         val type: Int,
         val format: AudioFormat,
         val connectionId: Any?,
@@ -187,7 +188,7 @@ class CarPlayMediaEngine(
         )
         val connectionId = stream["streamConnectionID"]
         val latencyMs = (stream["audioLatencyMs"] as? Number)?.toInt() ?: 0
-        if (type == 102 && audioType == "media") {
+        if (RuntimeDiagnostics.enabled() && type == 102 && audioType == "media") {
             Log.i("DiPlay-AAC", "AAC: event=session_timing negotiatedLatencyMs=$latencyMs rate=${format.sampleRate}")
         }
         val meta = AudioMeta(type, format, connectionId, latencyMs)
@@ -207,7 +208,7 @@ class CarPlayMediaEngine(
                 }
 
                 override fun onRtp(rtp: ByteArray, sample: Int) {
-                    if (meta.start?.playbackPosition != null) {
+                    if (RuntimeDiagnostics.enabled() && meta.start?.playbackPosition != null) {
                         val previous = meta.latestReceivedRtpSample
                         // Keep the newest decrypted packet in RTP order, including 32-bit wrap.
                         if (previous == -1L || sample - previous.toInt() > 0) {
@@ -351,32 +352,38 @@ class CarPlayMediaEngine(
             )
             val start = meta.start
             if (start != null) {
-                val latestReceived = meta.latestReceivedRtpSample
-                val position = start.playbackPosition?.invoke()
+                val diagnosticsEnabled = RuntimeDiagnostics.enabled()
+                val latestReceived = if (diagnosticsEnabled) meta.latestReceivedRtpSample else -1L
+                val playbackPosition = start.playbackPosition
+                val position = playbackPosition?.invoke()
                 val nowNs = position?.sampledAtNs ?: System.nanoTime()
-                val elapsedSec = Math.max(
-                    0.0,
-                    (nowNs - start.originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
-                )
                 val firstUnsigned = start.firstSample.toLong() and 0xffff_ffffL
-                val legacySample = (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and
-                    0xffff_ffffL
+                // Only streams without playback-head feedback need the elapsed-time calculation.
+                val legacySample = if (playbackPosition == null || diagnosticsEnabled) {
+                    val elapsedSec = Math.max(
+                        0.0,
+                        (nowNs - start.originNs) / 1e9 - meta.playoutLatencyMs / 1000.0,
+                    )
+                    (firstUnsigned + Math.round(elapsedSec * meta.format.sampleRate)) and 0xffff_ffffL
+                } else {
+                    firstUnsigned
+                }
                 val sampleTime = when {
                     position != null -> position.rtpSample
-                    start.playbackPosition != null -> firstUnsigned // PCM has not reached the playback head yet.
+                    playbackPosition != null -> firstUnsigned // PCM has not reached the playback head yet.
                     else -> legacySample
                 }
                 entry["streamConnectionID"] = unsignedPlistInteger(meta.connectionId ?: 0L)
                 entry["timestamp"] = session.syncedNtp()
                 entry["timestampRawNs"] = nowNs
                 entry["sampleTime"] = sampleTime
-                if (meta.type == 102 && meta.format.audioType == "media" &&
-                    (start.playbackPosition != null || nowNs >= meta.nextFeedbackLogNs)
+                if (diagnosticsEnabled && meta.type == 102 && meta.format.audioType == "media" &&
+                    (playbackPosition != null || nowNs >= meta.nextFeedbackLogNs)
                 ) {
                     meta.nextFeedbackLogNs = nowNs + 5_000_000_000L
                     val source = when {
                         position != null -> "playback_head"
-                        start.playbackPosition != null -> "awaiting_playback"
+                        playbackPosition != null -> "awaiting_playback"
                         else -> "legacy"
                     }
                     val streamTag = position?.diagnosticStreamId?.let { "stream=$it " }.orEmpty()
@@ -393,7 +400,7 @@ class CarPlayMediaEngine(
                         "latestReceivedRtpSample=$latestReceived rxAheadOfFeedbackMs=$rxAheadMs " +
                         "legacyAheadOfFeedbackMs=$legacyAheadMs"
                     Log.i("DiPlay-AAC", line)
-                    if (start.playbackPosition != null) sink.onAudioFeedbackDiagnostic(line)
+                    if (playbackPosition != null) sink.onAudioFeedbackDiagnostic(line)
                 }
             }
             entry

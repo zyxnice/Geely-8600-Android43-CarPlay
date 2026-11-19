@@ -1159,7 +1159,7 @@ class CarPlayHostActivity : ComponentActivity() {
         return root
     }
 
-    /** Wide 16:9 and wider head units use a split connection surface until video is active. */
+    /** Wide 16:9 and wider head units use this connection surface until video is active. */
     private fun buildWideConnectionPanel(): View {
         val overlay = FrameLayout(this).apply {
             setBackgroundColor(Color.argb(150, 0, 0, 0))
@@ -1176,12 +1176,6 @@ class CarPlayHostActivity : ComponentActivity() {
             setPadding(dp(28), dp(24), dp(28), dp(24))
             setBackgroundColor(Color.argb(238, 12, 17, 27))
         }
-        val right = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(24), dp(20), dp(24), dp(20))
-            setBackgroundColor(Color.argb(232, 7, 11, 17))
-        }
-
         leftContent.addView(TextView(this).apply {
             text = getString(R.string.diplay)
             textSize = 28f
@@ -1294,6 +1288,31 @@ class CarPlayHostActivity : ComponentActivity() {
             setOnClickListener { showDiPlayHome() }
         }, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(10) })
 
+        val leftScroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(leftContent, FrameLayout.LayoutParams(-1, -2))
+            contentDescription = "connection-actions-scroll"
+        }
+        if (RuntimeDiagnostics.enabled()) {
+            columns.addView(leftScroll, LinearLayout.LayoutParams(0, -1, 0.40f).apply { rightMargin = dp(12) })
+            columns.addView(
+                buildConnectionLogPanel(),
+                LinearLayout.LayoutParams(0, -1, 0.60f).apply { leftMargin = dp(12) },
+            )
+        } else {
+            columns.addView(leftScroll, LinearLayout.LayoutParams(-1, -1))
+        }
+        overlay.addView(columns, FrameLayout.LayoutParams(-1, -1))
+        wideConnectionPanel = overlay
+        return overlay
+    }
+
+    private fun buildConnectionLogPanel(): View {
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(20), dp(24), dp(20))
+            setBackgroundColor(Color.argb(232, 7, 11, 17))
+        }
         val logHeader = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
@@ -1322,12 +1341,11 @@ class CarPlayHostActivity : ComponentActivity() {
             isAllCaps = false
             textSize = 16f
             contentDescription = "connection-save-report"
-            visibility = if (RuntimeDiagnostics.enabled()) View.VISIBLE else View.GONE
             setOnClickListener { saveConnectionReport() }
         }, LinearLayout.LayoutParams(-2, dp(48)))
         latestLogButton = latest
         logHeader.addView(latest, LinearLayout.LayoutParams(-2, dp(44)))
-        right.addView(logHeader, LinearLayout.LayoutParams(-1, -2))
+        panel.addView(logHeader, LinearLayout.LayoutParams(-1, -2))
 
         val logText = TextView(this).apply {
             textSize = 14f
@@ -1353,18 +1371,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         logScrollChangedListener = scrollListener
         logs.viewTreeObserver.addOnScrollChangedListener(scrollListener)
-        right.addView(logs, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12) })
-
-        val leftScroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(leftContent, FrameLayout.LayoutParams(-1, -2))
-            contentDescription = "connection-actions-scroll"
-        }
-        columns.addView(leftScroll, LinearLayout.LayoutParams(0, -1, 0.40f).apply { rightMargin = dp(12) })
-        columns.addView(right, LinearLayout.LayoutParams(0, -1, 0.60f).apply { leftMargin = dp(12) })
-        overlay.addView(columns, FrameLayout.LayoutParams(-1, -1))
-        wideConnectionPanel = overlay
-        return overlay
+        panel.addView(logs, LinearLayout.LayoutParams(-1, 0, 1f).apply { topMargin = dp(12) })
+        return panel
     }
 
     private fun buildSettingsMenu(): View {

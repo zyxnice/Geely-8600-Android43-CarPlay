@@ -1046,14 +1046,6 @@ class Bands {
             if (lowband != null) {
                 haar1(lowband, lowband_ptr, N >> k, 1 << k);
             }
-            int idx1 = fill & 0xF;
-            int idx2 = fill >> 4;
-            if (idx1 < 0) {
-                System.out.println("e");
-            }
-            if (idx2 < 0) {
-                System.out.println("e");
-            }
             fill = bit_interleave_table[fill & 0xF] | bit_interleave_table[fill >> 4] << 2;
         }
         B >>= recombine;

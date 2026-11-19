@@ -65,7 +65,7 @@ android {
             if (geelyWifiLogComparison) isDebuggable = false
             applicationIdSuffix = ".repair1.geely8600"
             versionNameSuffix = when {
-                geelyWifiQuiet -> "-H53-NOLOG"
+                geelyWifiQuiet -> "-H53-FEEDBACK-HEAD-CAP520-NOLOG-20261119"
                 geelyWifiLogComparison -> "-H53-FEEDBACK-HEAD-CAP520-20261119"
                 geelyWifiTrial -> "-H53"
                 geelyPerformanceStage == "off" -> "-H53-USB2"

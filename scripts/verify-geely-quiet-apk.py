@@ -24,7 +24,7 @@ OUTPUTS = {
 }
 
 
-def inspect_apk(path):
+def inspect_apk(path, markers):
     blob = path.read_bytes()
     with zipfile.ZipFile(path) as archive:
         dex_names = [name for name in archive.namelist() if name.endswith(".dex") and "/" not in name]
@@ -52,7 +52,7 @@ def inspect_apk(path):
     return {
         "apk": str(path), "sha256": hashlib.sha256(blob).hexdigest(),
         "logging_output_method_refs": sorted(references),
-        "diagnostic_markers": {marker: any(marker in value for value in strings) for marker in MARKERS},
+        "diagnostic_markers": {marker: any(marker in value for value in strings) for marker in markers},
     }
 
 
@@ -60,8 +60,10 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("quiet", type=Path)
     parser.add_argument("--logged", type=Path, required=True)
+    parser.add_argument("--marker", action="append", default=[], help="Additional logged diagnostic marker")
     args = parser.parse_args()
-    quiet, logged = inspect_apk(args.quiet), inspect_apk(args.logged)
+    markers = (*MARKERS, *args.marker)
+    quiet, logged = inspect_apk(args.quiet, markers), inspect_apk(args.logged, markers)
     print(json.dumps({"quiet": quiet, "logged": logged}, ensure_ascii=False, indent=2))
     assert not quiet["logging_output_method_refs"], "Quiet APK still references logging output methods"
     assert not any(quiet["diagnostic_markers"].values()), "Diagnostic hot paths remain in quiet APK"

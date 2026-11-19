@@ -34,3 +34,7 @@
 -assumevalues class java.util.logging.Logger {
     public boolean isLoggable(...) return false;
 }
+# SLF4J's internal diagnostics go directly to stderr.
+-assumenosideeffects class org.slf4j.helpers.Util {
+    public static void report(...);
+}

@@ -221,6 +221,10 @@
     <string name="finish_setup_save_your_hotspot_details_to_use_this_mode">Finish setup · Save your hotspot details to use this mode.</string>
     <string name="follow_instrument_theme_and_map_card">Follow instrument theme and map card</string>
     <string name="frame_rate">Frame rate</string>
+    <string name="carplay_show_live_fps">Show live frame rate</string>
+    <string name="carplay_show_live_fps_description">Show the main CarPlay video output rate in the top right. Updates once a second.</string>
+    <string name="carplay_fps_value">%1$d FPS</string>
+    <string name="carplay_fps_sampling">— FPS</string>
     <string name="full_screen">Full screen</string>
     <string name="fullscreen">Fullscreen</string>
     <string name="getting_carplay_ready">Getting CarPlay ready…</string>

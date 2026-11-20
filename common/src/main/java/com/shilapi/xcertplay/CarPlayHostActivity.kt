@@ -270,6 +270,8 @@ class CarPlayHostActivity : ComponentActivity() {
         }
 
     private var videoView: TextureView? = null
+    private var fpsOverlay: CarPlayFpsOverlay? = null
+    private var showLiveFps = false
     private var gestureOverlay: View? = null
     private var settingsMenu: View? = null
     private var mfiTargetGroup: RadioGroup? = null
@@ -729,6 +731,8 @@ class CarPlayHostActivity : ComponentActivity() {
             recreate()
             return
         }
+        showLiveFps = AirPlayPersistence.loadShowFps(this)
+        updateFpsOverlay()
         locationPermissionAvailable = hasFineLocationPermission()
         if (locationReportingEnabled && !locationPermissionAvailable && !menuOpen) {
             requestLocationPermission()
@@ -992,6 +996,12 @@ class CarPlayHostActivity : ComponentActivity() {
         if (!isFinishing && !isChangingConfigurations) CenterMapOverlay.scheduleShow()
     }
 
+    override fun onPause() {
+        showLiveFps = false
+        updateFpsOverlay()
+        super.onPause()
+    }
+
     /** Shows the dashboard map as a card on the centre screen while DiPlay is in the background. */
     private fun showCenterMap() {
         if (isDestroyed || shuttingDown.get() || sink == null) return
@@ -1159,6 +1169,13 @@ class CarPlayHostActivity : ComponentActivity() {
             visibility = View.GONE
             setBackgroundColor(DiPlayBackground)
         }.also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
+        fpsOverlay = CarPlayFpsOverlay(this).also {
+            // Keep the readout in the physical top right for both LTR and RTL layouts.
+            root.addView(it, FrameLayout.LayoutParams(-2, -2, Gravity.TOP or Gravity.RIGHT).apply {
+                topMargin = dp(12)
+                rightMargin = dp(12)
+            })
+        }
         videoView = video
         gestureOverlay = gestureLayer
         stageStatusView = stage
@@ -4155,6 +4172,7 @@ class CarPlayHostActivity : ComponentActivity() {
             shutdownWaiters.add(completion)
             if (!shuttingDown.compareAndSet(false, true)) return
         }
+        updateFpsOverlay()
         restartGeneration += 1
         mainHandler.removeCallbacks(applyDisplaySize)
         val oldController = controller
@@ -4606,6 +4624,7 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun updateDebugOverlays() {
         val wide = isWideConnectionSurface()
         val mainVideoActive = SCREEN_TYPE_MAIN in activeScreenStreamTypes
+        updateFpsOverlay()
         val waitingForUsb = !wirelessEnabled && !mainVideoActive &&
             currentConnectionStatus == CarPlayStatus.WaitingForIphone
         if (!waitingForUsb) showUsbWaitDetails = false
@@ -4634,6 +4653,13 @@ class CarPlayHostActivity : ComponentActivity() {
             refreshLogView(System.currentTimeMillis())
         }
         updateLatestLogButton()
+    }
+
+    private fun updateFpsOverlay() {
+        val source = sink.takeIf {
+            showLiveFps && !shuttingDown.get() && !menuOpen && SCREEN_TYPE_MAIN in activeScreenStreamTypes
+        }
+        fpsOverlay?.showFrom(source)
     }
 
     private fun isWideConnectionSurface(): Boolean {

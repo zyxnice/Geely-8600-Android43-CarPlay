@@ -215,6 +215,8 @@
     <string name="finish_setup_save_your_hotspot_details_to_use_this_mode">完成设置 · 保存热点信息以使用此模式。</string>
     <string name="follow_instrument_theme_and_map_card">跟随仪表盘主题和地图卡片</string>
     <string name="frame_rate">帧率</string>
+    <string name="carplay_show_live_fps">显示实时帧率</string>
+    <string name="carplay_show_live_fps_description">在 CarPlay 右上角显示主画面输出帧率，每秒更新一次。</string>
     <string name="full_screen">全屏显示</string>
     <string name="fullscreen">全屏</string>
     <string name="getting_carplay_ready">正在准备 CarPlay…</string>

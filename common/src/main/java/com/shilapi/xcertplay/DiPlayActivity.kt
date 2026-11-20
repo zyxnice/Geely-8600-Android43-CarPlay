@@ -488,6 +488,13 @@ class DiPlayActivity : ComponentActivity() {
         content.addView(label(getString(R.string.apply_reconnects_carplay_for_size_resolution_music_buffer),
             15, MUTED).apply { setPadding(0, 0, 0, dp(12)) })
         section(content, getString(R.string.display_and_performance), R.drawable.ic_dp_display) { card ->
+            toggle(
+                card,
+                getString(R.string.carplay_show_live_fps),
+                getString(R.string.carplay_show_live_fps_description),
+                AirPlayPersistence.loadShowFps(this),
+                compact = true,
+            ) { AirPlayPersistence.saveShowFps(this, it) }
             carPlaySizeControl(card)
             choice(card, getString(R.string.resolution), listOf(getString(R.string.resolution_native), getString(R.string.s_80_lighter_load), getString(R.string.s_60_lightest_load)), listOf(10, 8, 6).indexOf(AirPlayPersistence.loadDisplayScaleTenths(this)).coerceAtLeast(0)) { AirPlayPersistence.saveDisplayScaleTenths(this, listOf(10, 8, 6)[it]) }
             val bufferPresets = com.shilapi.xcertplay.media.MediaAudioBuffer.presets

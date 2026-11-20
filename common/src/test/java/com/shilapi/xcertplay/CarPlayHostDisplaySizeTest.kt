@@ -16,6 +16,8 @@ import com.shilapi.xcertplay.transport.Iap2IdentificationConfig
 import java.time.Duration
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import com.shilapi.xcertplay.host.R
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -69,6 +71,49 @@ class CarPlayHostDisplaySizeTest {
         assertSame(display, getField("sessionDisplay"))
         assertEquals(0, getField("restartGeneration"))
         assertEquals(1, keepLogs())
+    }
+
+    @Test fun liveFpsSamplesMainOutputAndClearsWhenDisabledOrStopped() {
+        val overlay = CarPlayFpsOverlay(activity)
+        val sink = AndroidMediaSink()
+        val submitted = AndroidMediaSink::class.java.getDeclaredField("mainScreenSubmittedFrames")
+            .apply { isAccessible = true }.get(sink) as AtomicLong
+        val streams = getField("activeScreenStreamTypes") as MutableSet<*>
+        @Suppress("UNCHECKED_CAST")
+        val streamTypes = streams as MutableSet<Int>
+        setField("fpsOverlay", overlay)
+        setField("sink", sink)
+        val refresh = activity.javaClass.getDeclaredMethod("updateFpsOverlay").apply { isAccessible = true }
+        val looper = shadowOf(Looper.getMainLooper())
+
+        streamTypes.add(110)
+        refresh.invoke(activity)
+        assertEquals(View.GONE, overlay.visibility)
+
+        setField("showLiveFps", true)
+        refresh.invoke(activity)
+        assertEquals(View.VISIBLE, overlay.visibility)
+        assertEquals(activity.getString(R.string.carplay_fps_sampling), overlay.text.toString())
+        submitted.addAndGet(27)
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals(activity.getString(R.string.carplay_fps_value, 27), overlay.text.toString())
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals(activity.getString(R.string.carplay_fps_value, 0), overlay.text.toString())
+
+        setField("showLiveFps", false)
+        refresh.invoke(activity)
+        assertEquals(View.GONE, overlay.visibility)
+        submitted.addAndGet(40)
+        looper.idleFor(Duration.ofSeconds(1))
+        setField("showLiveFps", true)
+        refresh.invoke(activity)
+        assertEquals(activity.getString(R.string.carplay_fps_sampling), overlay.text.toString())
+        looper.idleFor(Duration.ofSeconds(1))
+        assertEquals(activity.getString(R.string.carplay_fps_value, 0), overlay.text.toString())
+
+        streamTypes.clear()
+        refresh.invoke(activity)
+        assertEquals(View.GONE, overlay.visibility)
     }
 
     @Test fun connectingInANarrowWindowRebuildsWhenTheCameraCloses() {

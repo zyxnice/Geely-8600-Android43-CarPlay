@@ -33,6 +33,8 @@ import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.TimeUnit
 
+private const val MAIN_SCREEN_STREAM_TYPE = 110
+
 /** MediaCodec buffer accessors moved from array to indexed methods in API 21. */
 private fun inputBufferAt(codec: MediaCodec, index: Int): ByteBuffer? =
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) codec.getInputBuffer(index)
@@ -351,6 +353,7 @@ class AndroidMediaSink(
     private val activeScreenTypes = mutableSetOf<Int>()
     private val defaultSurface = surface
     @Volatile private var screenStreamActiveChanged = onScreenStreamActiveChanged
+    private val mainScreenSubmittedFrames = AtomicLong()
     private val surfaces = ConcurrentHashMap<Int, Surface>()
     private val videoDecoders = ConcurrentHashMap<Int, VideoDecoder>()
     private val mediaAudioTypes = mutableSetOf<AudioStreamId>()
@@ -399,6 +402,9 @@ class AndroidMediaSink(
     fun clearSurface(type: Int, surface: Surface) {
         if (surfaces.remove(type, surface)) videoDecoders[type]?.setSurface(null)
     }
+
+    /** Cumulative picture submissions to the main Surface for this sink. */
+    fun mainScreenSubmittedFrameCount(): Long = mainScreenSubmittedFrames.get()
 
     /**
      * Also decodes stream [type] onto [surface] with its own decoder, one per [key], which
@@ -610,8 +616,11 @@ class AndroidMediaSink(
         report = { videoDiagnosticHandlers[type]?.invoke(it) },
         statsLabel = statsLabel,
         performance = performance,
-        traceDirectory = if (performance.stage == "B" && type == 110 && statsLabel == null)
+        traceDirectory = if (performance.stage == "B" && type == MAIN_SCREEN_STREAM_TYPE && statsLabel == null)
             appContext?.let { File(it.getExternalFilesDir(null) ?: it.filesDir, "frame-trace") } else null,
+        submittedFrameCounter = mainScreenSubmittedFrames.takeIf {
+            type == MAIN_SCREEN_STREAM_TYPE && statsLabel == null
+        },
     )
 
     @Synchronized
@@ -648,6 +657,7 @@ private class VideoDecoder(
     statsLabel: String? = null,
     private val performance: com.shilapi.xcertplay.compat.GeelyMediaOptions,
     traceDirectory: File? = null,
+    private val submittedFrameCounter: AtomicLong? = null,
 ) : Closeable {
     // Diagnostic I/O and formatting stay off receive/decode/UI threads.
     private val traceLog = traceDirectory?.takeIf { RuntimeDiagnostics.enabled() }?.let { directory ->
@@ -679,7 +689,7 @@ private class VideoDecoder(
     )
     private var lastKeyFrameRequestNs = 0L
     // The main screen keeps the historical log format; other screens are labelled.
-    private val stats = VideoStats(statsLabel ?: if (streamType == 110) "" else " stream=$streamType")
+    private val stats = VideoStats(statsLabel ?: if (streamType == MAIN_SCREEN_STREAM_TYPE) "" else " stream=$streamType")
     private val pipeline = VideoPipelineStats(report = { report(it) })
     // Output selection remains scoped to the B hardware candidate.
     private val latestDecodedOutput = performance.stage == "B"
@@ -1087,6 +1097,7 @@ private class VideoDecoder(
         val picture = flags and MediaCodec.BUFFER_FLAG_CODEC_CONFIG == 0 &&
             !(flags and MediaCodec.BUFFER_FLAG_END_OF_STREAM != 0 && bytes == 0)
         if (picture) {
+            if (render) submittedFrameCounter?.incrementAndGet()
             traceIndex?.release(presentationTimeUs, render, submittedNs,
                 if (requested) "output_rejected" else "not_requested")
             pipeline.output(render)

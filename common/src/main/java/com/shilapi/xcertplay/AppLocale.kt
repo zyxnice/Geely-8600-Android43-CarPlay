@@ -66,9 +66,10 @@ object AppLocale {
             return context
         }
         val locale = locale(preference(context)) ?: return context
-        val configuration = Configuration(context.resources.configuration).apply {
+        // Override only the locale so rotation, window size, density and font scale still follow Android.
+        val configuration = Configuration().apply {
+            fontScale = 0f
             setLocale(locale)
-            setLayoutDirection(locale)
         }
         return context.createConfigurationContext(configuration)
     }

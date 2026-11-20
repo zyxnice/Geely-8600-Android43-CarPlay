@@ -95,6 +95,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
+internal const val EXTRA_OFFER_WIRELESS_SWITCH = "com.shilapi.xcertplay.OFFER_WIRELESS_SWITCH"
 internal const val EXTRA_TRANSPORT_WIRELESS = "com.shilapi.xcertplay.TRANSPORT_WIRELESS"
 
 /**
@@ -113,6 +114,8 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private var connectionPanel: View? = null
     private var wideConnectionPanel: View? = null
+    private var usbWaitingPanel: FrameLayout? = null
+    private var showUsbWaitDetails = false
     private val keyDiagnostics = ConnectionKeyDiagnostics()
     private var keyDiagnosticsView: TextView? = null
     private var connectionReportSaving = false
@@ -1041,6 +1044,7 @@ class CarPlayHostActivity : ComponentActivity() {
         refreshConfiguration(newConfig)
         applyFullscreenMode()
         stageStatusView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+        usbWaitingPanel?.removeAllViews()
         updateDebugOverlays()
         scrollLogsToBottom()
         videoView?.post {
@@ -1151,6 +1155,10 @@ class CarPlayHostActivity : ComponentActivity() {
         }, LinearLayout.LayoutParams(dp(300), dp(56)))
         root.addView(panel, FrameLayout.LayoutParams(-1, -1))
         root.addView(buildWideConnectionPanel(), FrameLayout.LayoutParams(-1, -1))
+        usbWaitingPanel = FrameLayout(this).apply {
+            visibility = View.GONE
+            setBackgroundColor(DiPlayBackground)
+        }.also { root.addView(it, FrameLayout.LayoutParams(-1, -1)) }
         videoView = video
         gestureOverlay = gestureLayer
         stageStatusView = stage
@@ -3542,6 +3550,14 @@ class CarPlayHostActivity : ComponentActivity() {
         object : AirPlaySessionListener {
             private val diagnosticLog = sessionLog
 
+            override fun onDeviceInfo(session: AirPlaySession, info: com.shilapi.xcertplay.airplay.AirPlayDeviceInfo) {
+                runOnUiThread {
+                    if (controllerGeneration == restartGeneration && info.name.isNotBlank()) {
+                        CarPlayBackgroundSession.updatePhoneName(this@CarPlayHostActivity, info.name)
+                    }
+                }
+            }
+
             override fun onSessionActive(session: AirPlaySession) {
                 runOnUiThread {
                     if (controllerGeneration != restartGeneration) {
@@ -3675,7 +3691,7 @@ class CarPlayHostActivity : ComponentActivity() {
         sessionDisplay = snapshot.display
         MapMirrors.reapply()
         CarPlayBackgroundSession.store(snapshot.controller, snapshot.sink, snapshot.width, snapshot.height,
-            this, snapshot.display) { completion ->
+            this, snapshot.display, snapshot.target) { completion ->
             runOnUiThread {
                 shutdown(false, "DiPlay disconnect", completion)
                 finish()
@@ -3804,7 +3820,14 @@ class CarPlayHostActivity : ComponentActivity() {
             displayRotation(), hideTopBar, hideBottomBar, size.width, size.height)
         sessionDisplay = display
         videoView?.let { updateVideoLayout(it.width, it.height) }
-        CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display) { completion ->
+        val target = CarPlayBackgroundSession.Target(
+            wireless = wirelessEnabled,
+            phoneAddress = config.wirelessBluetoothDeviceAddress.takeIf { wirelessEnabled },
+            phoneName = DiPlayPreferences.phoneName(this).takeIf {
+                wirelessEnabled && config.wirelessBluetoothDeviceAddress != null
+            },
+        )
+        CarPlayBackgroundSession.store(next, renderer, size.width, size.height, this, display, target) { completion ->
             runOnUiThread {
                 shutdown(terminateProcess = false, reason = "DiPlay disconnect", completion = completion)
                 finish()
@@ -4064,10 +4087,12 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private fun showDiPlayHome(page: String = "home") {
+    private fun showDiPlayHome(page: String = "home", offerWirelessSwitch: Boolean = false) {
         controller?.sendTouch(emptyList())
         startActivity(Intent(this, DiPlayActivity::class.java)
-            .putExtra("page", page).addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
+            .putExtra("page", page)
+            .putExtra(EXTRA_OFFER_WIRELESS_SWITCH, offerWirelessSwitch)
+            .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
 
     private fun openSettingsMenu() = showDiPlayHome("settings")
@@ -4534,21 +4559,74 @@ class CarPlayHostActivity : ComponentActivity() {
     private fun connectionUiText(chinese: String, english: String): String =
         if (resources.configuration.locale?.language == "zh") chinese else english
 
+    private fun showUsbWaitingPanel(panel: FrameLayout) {
+        if (panel.childCount > 0) return
+        val content = diPlayColumn()
+        content.addView(diPlayPageHeader(
+            connectionSelected = true,
+            settingsSelected = false,
+            onConnection = {},
+            onSettings = ::openSettingsMenu,
+            onCarHome = { startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)) },
+        ))
+        val connection = DiPlayConnectionView(this) { wireless ->
+            if (wireless) showDiPlayHome(offerWirelessSwitch = true)
+        }.apply {
+            val inset = diPlayDp(if (diPlayLayoutWidth() >= 620) 28 else 12)
+            setPadding(inset, diPlayDp(18), inset, diPlayDp(22))
+        }
+        val actions = buildList {
+            add(DiPlayConnectionView.Action(R.string.diplay_cancel_wait, DiPlayButtonStyle.DISCONNECT) {
+                if (!CarPlayBackgroundSession.isStopping()) {
+                    CarPlayBackgroundSession.stop { showDiPlayHome() }
+                }
+            })
+            if (RuntimeDiagnostics.enabled()) {
+                add(DiPlayConnectionView.Action(R.string.diagnostics) {
+                    showUsbWaitDetails = true
+                    updateDebugOverlays()
+                })
+            }
+        }
+        connection.show(
+            wireless = false,
+            status = getString(R.string.diplay_waiting_device),
+            title = getString(R.string.diplay_waiting_usb),
+            guidance = getString(R.string.diplay_usb_insert_hint),
+            tone = Color.rgb(243, 206, 139),
+            actions = actions,
+        )
+        content.addView(ScrollView(this).apply {
+            isFillViewport = true
+            addView(connection, FrameLayout.LayoutParams(-1, -2))
+        }, LinearLayout.LayoutParams(-1, 0, 1f))
+        panel.addView(content, FrameLayout.LayoutParams(-1, -1))
+    }
+
     private fun updateDebugOverlays() {
         val wide = isWideConnectionSurface()
         val mainVideoActive = SCREEN_TYPE_MAIN in activeScreenStreamTypes
+        val waitingForUsb = !wirelessEnabled && !mainVideoActive &&
+            currentConnectionStatus == CarPlayStatus.WaitingForIphone
+        if (!waitingForUsb) showUsbWaitDetails = false
+        val useWaitingPanel = waitingForUsb && !showUsbWaitDetails && lastFailureMessage == null &&
+            !shuttingDown.get()
         val logsWereVisible = statusScrollView?.visibility == View.VISIBLE
         val connectionWasVisible = connectionPanel?.visibility == View.VISIBLE ||
-            wideConnectionPanel?.visibility == View.VISIBLE
+            wideConnectionPanel?.visibility == View.VISIBLE || usbWaitingPanel?.visibility == View.VISIBLE
+        usbWaitingPanel?.let { panel ->
+            panel.visibility = if (useWaitingPanel) View.VISIBLE else View.GONE
+            if (useWaitingPanel) showUsbWaitingPanel(panel)
+        }
         connectionPanel?.visibility =
-            if (!wide && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
-        wideConnectionPanel?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
+            if (!useWaitingPanel && !wide && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
+        wideConnectionPanel?.visibility = if (!useWaitingPanel && wide && !mainVideoActive) View.VISIBLE else View.GONE
         if (connectionWasVisible && connectionPanel?.visibility != View.VISIBLE &&
-            wideConnectionPanel?.visibility != View.VISIBLE) {
+            wideConnectionPanel?.visibility != View.VISIBLE && usbWaitingPanel?.visibility != View.VISIBLE) {
             Log.i("DiPlayUsbTiming", "event=main_connection_panel_hidden " +
                 "elapsedNs=${android.os.SystemClock.elapsedRealtimeNanos()}")
         }
-        statusScrollView?.visibility = if (wide && !mainVideoActive) View.VISIBLE else View.GONE
+        statusScrollView?.visibility = if (!useWaitingPanel && wide && !mainVideoActive) View.VISIBLE else View.GONE
         // Hidden panels retain their model/file history without rebuilding text layouts.
         // Refresh once on reveal so a disconnect immediately shows current diagnostics.
         refreshKeyDiagnosticsView()
@@ -4885,6 +4963,15 @@ internal object CarPlayBackgroundSession {
     private var owner: Any? = null
     @Synchronized fun isOwner(candidate: Any): Boolean = owner === candidate
     @Synchronized fun hasSession(): Boolean = stopAction != null || stopping
+    @Synchronized fun isStopping(): Boolean = stopping
+
+    data class Target(val wireless: Boolean, val phoneAddress: String?, val phoneName: String?)
+    private var target: Target? = null
+    @Synchronized fun connectionTarget(): Target? = target
+    @Synchronized fun updatePhoneName(expectedOwner: Any, name: String) {
+        if (owner === expectedOwner) target = target?.copy(phoneName = name)
+    }
+
     private val stopWaiters = mutableListOf<() -> Unit>()
 
     fun stop(completion: () -> Unit = {}) {
@@ -4910,6 +4997,7 @@ internal object CarPlayBackgroundSession {
         val width: Int,
         val height: Int,
         val display: CarPlaySessionDisplay,
+        val target: Target,
     )
 
     private var controller: CarPlayController? = null
@@ -4923,12 +5011,13 @@ internal object CarPlayBackgroundSession {
         val currentController = controller ?: return null
         val currentSink = sink ?: return null
         val currentDisplay = display ?: return null
-        return Snapshot(currentController, currentSink, width, height, currentDisplay)
+        val currentTarget = target ?: return null
+        return Snapshot(currentController, currentSink, width, height, currentDisplay, currentTarget)
     }
 
     @Synchronized
     fun store(controller: CarPlayController, sink: AndroidMediaSink, width: Int, height: Int,
-        owner: Any, display: CarPlaySessionDisplay, stop: (() -> Unit) -> Unit) {
+        owner: Any, display: CarPlaySessionDisplay, target: Target, stop: (() -> Unit) -> Unit) {
         this.stopAction = stop
         this.owner = owner
         this.controller = controller
@@ -4936,6 +5025,7 @@ internal object CarPlayBackgroundSession {
         this.width = width
         this.height = height
         this.display = display
+        this.target = target
     }
 
     @Synchronized
@@ -4943,7 +5033,11 @@ internal object CarPlayBackgroundSession {
         if (expected != null && controller !== expected) return
         controller = null
         sink = null
-        if (!keepOwner) { stopAction = null; owner = null }
+        if (!keepOwner) {
+            stopAction = null
+            owner = null
+            target = null
+        }
         active = false
         width = 0
         height = 0

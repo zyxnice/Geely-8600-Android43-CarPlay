@@ -113,7 +113,8 @@ class CarPlayCloseGateTest {
         setField("controller", current)
         setField("sink", sink)
         CarPlayBackgroundSession.store(current, sink, 1920, 990, activity,
-            CarPlaySessionDisplay(1920, 990, Surface.ROTATION_0, true, true, 1920, 990)) {}
+            CarPlaySessionDisplay(1920, 990, Surface.ROTATION_0, true, true, 1920, 990),
+            CarPlayBackgroundSession.Target(false, null, null)) {}
     }
 
     private fun shutdown(completion: () -> Unit) {

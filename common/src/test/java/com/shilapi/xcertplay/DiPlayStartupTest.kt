@@ -1,5 +1,6 @@
 package com.shilapi.xcertplay
 
+import android.bluetooth.BluetoothManager
 import android.content.Context
 import android.content.Intent
 import android.os.Bundle
@@ -27,8 +28,8 @@ import org.robolectric.android.controller.ActivityController
 import org.robolectric.android.util.concurrent.PausedExecutorService
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.LooperMode
+import org.robolectric.shadows.ShadowAlertDialog
 import org.robolectric.shadows.ShadowLog
-import org.robolectric.shadows.ShadowToast
 
 @RunWith(RobolectricTestRunner::class)
 @Config(sdk = [29])
@@ -63,14 +64,13 @@ class DiPlayStartupTest {
         val activity = controller.get()
 
         assertPreparing(controller)
-        assertTrue(text(activity, R.string.a_familiar_drive).isShown)
+        assertTrue(text(activity, R.string.diplay_connection_mode).isShown)
         assertTrue(text(activity, R.string.preparing_mfi_authentication).isShown)
-        assertTrue(button(activity, R.string.connect_phone).isEnabled)
-        assertTrue(button(activity, R.string.connect_with_usb).isEnabled)
+        assertTrue(modeButton(activity, wireless = true).isEnabled)
+        assertTrue(modeButton(activity, wireless = false).isEnabled)
         assertNoNavigation(activity)
 
         click(activity, R.string.settings)
-        assertTrue(text(activity, R.string.your_drive_your_way).isShown)
         assertTrue(button(activity, R.string.open_connection_setup).isShown)
         assertPreparing(controller)
         assertNoNavigation(activity)
@@ -80,11 +80,11 @@ class DiPlayStartupTest {
         val controller = createActivity()
         val activity = controller.get()
 
-        click(activity, R.string.connect_with_usb)
+        clickMode(activity, wireless = false)
         assertEquals(false, field(activity, "pendingConnection"))
         assertNoNavigation(activity)
         repeat(2) {
-            click(activity, R.string.connect_phone)
+            clickMode(activity, wireless = true)
             assertEquals(true, field(activity, "pendingConnection"))
             assertNoNavigation(activity)
         }
@@ -107,8 +107,8 @@ class DiPlayStartupTest {
         assertTrue(context.assets.list("offline-mfi").orEmpty().isEmpty())
         val controller = createActivity()
         val activity = controller.get()
-        click(activity, R.string.connect_with_usb)
-        click(activity, R.string.connect_phone)
+        clickMode(activity, wireless = false)
+        clickMode(activity, wireless = true)
         assertPreparing(controller)
         assertNoNavigation(activity)
 
@@ -120,12 +120,11 @@ class DiPlayStartupTest {
         assertNull(field(activity, "pendingConnection"))
         assertTrue(text(activity, R.string.setup_error_auth).isShown)
         assertTrue(text(activity, R.string.setup_needs_attention).isShown)
-        assertFalse(button(activity, R.string.connect_phone).isEnabled)
+        assertFalse(modeButton(activity, wireless = true).isEnabled)
         assertTrue(ShadowLog.getLogsForTag("DiPlaySetup").single().throwable is FileNotFoundException)
         assertNoNavigation(activity)
 
-        click(activity, R.string.connect_with_usb)
-        assertEquals(activity.getString(R.string.setup_error_auth), ShadowToast.getTextOfLatestToast())
+        assertFalse(modeButton(activity, wireless = false).isEnabled)
         controller.pause().resume()
         shadowOf(Looper.getMainLooper()).idle()
         assertNoNavigation(activity)
@@ -134,7 +133,7 @@ class DiPlayStartupTest {
     @Test fun authenticationWhilePausedWaitsForResumeBeforeOpeningProjection() {
         val controller = createActivity()
         val activity = controller.get()
-        click(activity, R.string.connect_with_usb)
+        clickMode(activity, wireless = false)
         controller.pause()
 
         completeAuthenticationSuccessfully(controller)
@@ -155,7 +154,7 @@ class DiPlayStartupTest {
     @Test fun authenticationCallbackDeliveredAfterDestroyIsIgnored() {
         val controller = createActivity()
         val activity = controller.get()
-        click(activity, R.string.connect_with_usb)
+        clickMode(activity, wireless = false)
         controller.pause().stop()
 
         // Finish the task before shutdown clears it, but deliver its callback after destruction.
@@ -175,8 +174,8 @@ class DiPlayStartupTest {
     @Test fun savedPendingUsbFalseSurvivesRecreationAndOverridesWirelessAutoConnect() {
         AirPlayPersistence.saveWirelessEnabled(context, true)
         val original = createActivity()
-        click(original.get(), R.string.connect_phone)
-        click(original.get(), R.string.connect_with_usb)
+        clickMode(original.get(), wireless = true)
+        clickMode(original.get(), wireless = false)
         assertEquals(false, field(original.get(), "pendingConnection"))
         assertNoNavigation(original.get())
         val state = Bundle()
@@ -283,7 +282,7 @@ class DiPlayStartupTest {
         assertNull(field(activity, "pendingConnection"))
         assertTrue(text(activity, R.string.carplay_connected).isShown)
         assertNoNavigation(activity)
-        click(activity, R.string.open_carplay)
+        click(activity, R.string.diplay_continue_carplay)
         assertProjection(activity, wireless = false)
         assertPreparing(controller)
         assertNull(field(activity, "pendingConnection"))
@@ -293,6 +292,41 @@ class DiPlayStartupTest {
         assertEquals(0, stops)
         assertTrue(CarPlayBackgroundSession.hasSession())
         assertTrue(CarPlayBackgroundSession.active)
+    }
+
+    @Test fun switchingPairedPhonesWaitsForTheCurrentSessionToClose() {
+        var completedStop: (() -> Unit)? = null
+        val stopAction: (() -> Unit) -> Unit = { completedStop = it }
+        CarPlayBackgroundSession::class.java.getDeclaredField("stopAction")
+            .apply { isAccessible = true }.set(CarPlayBackgroundSession, stopAction)
+        CarPlayBackgroundSession::class.java.getDeclaredField("target").apply { isAccessible = true }
+            .set(CarPlayBackgroundSession, CarPlayBackgroundSession.Target(true, "02:00:00:00:00:01", "Test iPhone"))
+        CarPlayBackgroundSession.active = true
+        val controller = createActivity()
+        val activity = controller.get()
+        completeAuthenticationSuccessfully(controller)
+
+        val adapter = activity.getSystemService(BluetoothManager::class.java).adapter
+        adapter.enable()
+        val current = adapter.getRemoteDevice("02:00:00:00:00:01")
+        val replacement = adapter.getRemoteDevice("02:00:00:00:00:02")
+        shadowOf(current).setName("Test iPhone")
+        shadowOf(replacement).setName("Other iPhone")
+        shadowOf(adapter).setBondedDevices(setOf(current, replacement))
+
+        click(activity, R.string.diplay_switch_phone)
+        val dialog = ShadowAlertDialog.getLatestAlertDialog()
+        val buttons = views(dialog.window!!.decorView).filterIsInstance<Button>().toList()
+        assertTrue(buttons.any { it.text.contains(activity.getString(R.string.diplay_phone_current)) })
+        buttons.single { it.text == activity.getString(R.string.diplay_switch_to_phone, "Other iPhone") }.performClick()
+        assertTrue(CarPlayBackgroundSession.isStopping())
+        assertTrue(text(activity, R.string.diplay_disconnecting).isShown)
+        assertNoNavigation(activity)
+
+        CarPlayBackgroundSession.clear()
+        requireNotNull(completedStop).invoke()
+        assertProjection(activity, wireless = true)
+        assertEquals(replacement.address, DiPlayPreferences.phoneAddress(activity))
     }
 
     private fun createActivity(state: Bundle? = null): ActivityController<DiPlayActivity> {
@@ -335,6 +369,17 @@ class DiPlayStartupTest {
 
     private fun assertNoNavigation(activity: DiPlayActivity) {
         assertNull("Authentication must not launch an Activity here", shadowOf(activity).nextStartedActivity)
+    }
+
+    private fun modeButton(activity: DiPlayActivity, wireless: Boolean): Button =
+        views(activity.window.decorView).filterIsInstance<Button>()
+            .single { it.text.startsWith(if (wireless) "Wi-Fi" else "USB") }
+
+    private fun clickMode(activity: DiPlayActivity, wireless: Boolean) {
+        val button = modeButton(activity, wireless)
+        assertTrue(button.isShown)
+        assertTrue(button.isEnabled)
+        assertTrue(button.performClick())
     }
 
     private fun click(activity: DiPlayActivity, textId: Int) {

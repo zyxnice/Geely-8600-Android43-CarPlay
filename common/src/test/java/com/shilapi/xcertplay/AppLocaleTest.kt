@@ -2,6 +2,8 @@ package com.shilapi.xcertplay
 
 import android.app.LocaleManager
 import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.Configuration
 import android.os.LocaleList
 import android.view.View
 import org.junit.Assert.*
@@ -58,5 +60,26 @@ class AppLocaleTest {
         assertEquals(original, context.resources.configuration.locales.toLanguageTags())
         AppLocale.save(context, AppLocale.SYSTEM)
         assertSame(context, AppLocale.wrap(context))
+    }
+
+    @Test @Config(sdk = [29], qualifiers = "w1280dp-h480dp-land")
+    fun olderAndroidLeavesWindowAndFontConfigurationToTheSystem() {
+        AppLocale.save(context, AppLocale.SIMPLIFIED_CHINESE)
+        var override: Configuration? = null
+        val activityContext = object : ContextWrapper(context) {
+            override fun createConfigurationContext(overrideConfiguration: Configuration): Context {
+                override = Configuration(overrideConfiguration)
+                return super.createConfigurationContext(overrideConfiguration)
+            }
+        }
+
+        val wrapped = AppLocale.wrap(activityContext)
+        val configuration = requireNotNull(override)
+        assertEquals(Locale.SIMPLIFIED_CHINESE, wrapped.resources.configuration.locales[0])
+        assertEquals(0, configuration.screenWidthDp)
+        assertEquals(0, configuration.screenHeightDp)
+        assertEquals(0, configuration.densityDpi)
+        assertEquals(Configuration.ORIENTATION_UNDEFINED, configuration.orientation)
+        assertEquals(0f, configuration.fontScale)
     }
 }

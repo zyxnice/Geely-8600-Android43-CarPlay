@@ -192,7 +192,8 @@ class CarPlayHostDisplaySizeTest {
             AirPlayIdentity.generate(), PairingStore(), object : AirPlaySessionListener {},
             object : AirPlayMediaHandler {}, {})
         try {
-            CarPlayBackgroundSession.store(controller, sink, 1920, 990, Any(), display) {}
+            val target = CarPlayBackgroundSession.Target(true, "02:00:00:00:00:03", "Test iPhone")
+            CarPlayBackgroundSession.store(controller, sink, 1920, 990, Any(), display, target) {}
             val adopted = activity.javaClass.getDeclaredMethod("adoptBackgroundSession")
                 .apply { isAccessible = true }.invoke(activity)
             assertEquals(true, adopted)
@@ -201,6 +202,7 @@ class CarPlayHostDisplaySizeTest {
             assertSame(sink, getField("sink"))
             assertEquals(display, getField("sessionDisplay"))
             assertEquals(display, CarPlayBackgroundSession.snapshot()?.display)
+            assertEquals(target, CarPlayBackgroundSession.connectionTarget())
             assertFalse(controller.isClosed())
             assertEquals(0, getField("restartGeneration"))
             applySize(1920, 990)

@@ -104,11 +104,15 @@ class WirelessDisconnectReportTest {
         }
     }
 
-    @Test fun incidentHistoryRetainsTheLatest24CompleteRecords() {
+    @Test fun incidentHistoryRetainsTheLatest500CompleteRecords() {
         val directory = temporary.newFolder()
-        repeat(29) { index -> WirelessDisconnectReport.append(directory, JSONObject().put("index", index)) }
-        val records = File(directory, "logs/wifi-disconnects.jsonl").readLines()
-        assertEquals((5..28).toList(), records.map { JSONObject(it).getInt("index") })
+        val file = File(directory, "logs/wifi-disconnects.jsonl")
+        check(file.parentFile!!.mkdirs())
+        file.bufferedWriter().use { writer ->
+            repeat(499) { index -> writer.appendLine(JSONObject().put("index", index).toString()) }
+        }
+        for (index in 499..504) WirelessDisconnectReport.append(directory, JSONObject().put("index", index))
+        assertEquals((5..504).toList(), file.readLines().map { JSONObject(it).getInt("index") })
     }
 
     private fun exportedRecords(): List<JSONObject> = buildString {

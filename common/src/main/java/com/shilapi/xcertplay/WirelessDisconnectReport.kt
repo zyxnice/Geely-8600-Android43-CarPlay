@@ -27,7 +27,8 @@ import java.util.concurrent.TimeoutException
 
 /** Small, app-private incident history. Disk writes and Android service queries use one worker. */
 internal object WirelessDisconnectReport {
-    private const val MAX_RECORDS = 24
+    private const val MAX_RECORDS = 500
+    private const val MAX_PENDING = 24
     private const val FILE_NAME = "wifi-disconnects.jsonl"
     private const val SNAPSHOT_TIMEOUT_MS = 750L
     private const val MIB = 1024 * 1024L
@@ -47,7 +48,7 @@ internal object WirelessDisconnectReport {
     )
 
     private val worker = lazy {
-        BoundedDiagnosticWriter<Pending>(maxPending = MAX_RECORDS, threadName = "diplay-wifi-disconnect") { pending ->
+        BoundedDiagnosticWriter<Pending>(maxPending = MAX_PENDING, threadName = "diplay-wifi-disconnect") { pending ->
             runCatching { append(pending.context.filesDir, record(pending)) }.onFailure {
                 lastStorageError = it.javaClass.simpleName
             }
@@ -87,7 +88,9 @@ internal object WirelessDisconnectReport {
         val updated = (read(target) + record.toString()).takeLast(MAX_RECORDS)
         val output = target.startWrite()
         try {
-            output.write(updated.joinToString("\n", postfix = "\n").toByteArray(Charsets.UTF_8))
+            val writer = output.bufferedWriter(Charsets.UTF_8)
+            updated.forEach { writer.appendLine(it) }
+            writer.flush()
             target.finishWrite(output)
         } catch (failure: Exception) {
             target.failWrite(output)

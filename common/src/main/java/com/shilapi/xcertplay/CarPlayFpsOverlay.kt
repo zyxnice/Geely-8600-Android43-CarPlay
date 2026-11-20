@@ -20,20 +20,28 @@ internal class CarPlayFpsOverlay(context: Context) : TextView(context) {
     private var source: AndroidMediaSink? = null
     private var lastCount = 0L
     private var sampledAt = 0L
+    private var windowStartCount = 0L
+    private var windowStartedAt = 0L
+    private var displayedFps = -1
     private val update = object : Runnable {
         override fun run() {
             val sink = source ?: return
             val now = SystemClock.elapsedRealtime()
             val count = sink.mainScreenSubmittedFrameCount()
-            val elapsed = now - sampledAt
+            val elapsed = now - windowStartedAt
             if (elapsed > 0) {
-                val fps = ((count - lastCount) * 1000.0 / elapsed).roundToInt()
-                val reading = context.getString(R.string.carplay_fps_value, fps)
-                if (!reading.contentEquals(text)) text = reading
+                val fps = ((count - windowStartCount) * 1000.0 / elapsed).roundToInt()
+                if (fps != displayedFps) {
+                    displayedFps = fps
+                    text = context.getString(R.string.carplay_fps_value, fps)
+                }
+                // Use two sampling intervals to smooth integer frame counts and any UI timer delay.
+                windowStartCount = lastCount
+                windowStartedAt = sampledAt
                 lastCount = count
                 sampledAt = now
             }
-            handler.postDelayed(this, 1000L)
+            handler.postDelayed(this, SAMPLE_INTERVAL_MS)
         }
     }
 
@@ -61,13 +69,20 @@ internal class CarPlayFpsOverlay(context: Context) : TextView(context) {
         }
         lastCount = sink.mainScreenSubmittedFrameCount()
         sampledAt = SystemClock.elapsedRealtime()
+        windowStartCount = lastCount
+        windowStartedAt = sampledAt
+        displayedFps = -1
         setText(R.string.carplay_fps_sampling)
         visibility = View.VISIBLE
-        handler.postDelayed(update, 1000L)
+        handler.postDelayed(update, SAMPLE_INTERVAL_MS)
     }
 
     override fun onDetachedFromWindow() {
         showFrom(null)
         super.onDetachedFromWindow()
+    }
+
+    private companion object {
+        const val SAMPLE_INTERVAL_MS = 250L
     }
 }

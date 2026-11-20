@@ -24,6 +24,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AirPlayConfig
+import com.shilapi.xcertplay.airplay.AirPlayDisconnectEvidence
 import com.shilapi.xcertplay.airplay.AirPlayContact
 import com.shilapi.xcertplay.airplay.AirPlayDeviceInfo
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
@@ -161,6 +162,7 @@ class CarPlayController(
     private val locationProvider: Iap2LocationProvider? = null,
     private val vehicleStatusProvider: com.shilapi.xcertplay.transport.VehicleStatusProvider? = null,
     private val geelyBluetoothEnabled: Boolean = false,
+    private val onWirelessDisconnect: ((WirelessDisconnectObservation) -> Unit)? = null,
 ) : Closeable {
     private val geelyNavigation = GeelyNavigationObservation.create(context.applicationContext, ::debugLog)
 
@@ -272,6 +274,8 @@ class CarPlayController(
     private val wirelessActiveReported = AtomicBoolean(false)
     private val wirelessGeneration = AtomicInteger(0)
     private val wirelessConnectionProof = WirelessConnectionProof<AirPlaySession>()
+    private val wirelessDisconnects = onWirelessDisconnect?.let { WirelessDisconnectTracker() }
+    @Volatile private var wirelessHotspotSnapshot: WirelessHotspotSnapshot? = null
 
     private var permissionCloseable: Closeable? = null
     private var attachCloseable: Closeable? = null
@@ -995,6 +999,7 @@ class CarPlayController(
                 closeWirelessStack()
                 return
             }
+            if (wirelessDisconnects != null) wirelessHotspotSnapshot = WirelessHotspotSnapshot(hotspotInfo)
             val startedHotspot = hotspot
             wirelessConnectionProof.begin(generation) {
                 if (!isStaleWirelessRun(generation)) startedHotspot?.onCarPlayConfirmed()
@@ -1302,6 +1307,12 @@ class CarPlayController(
                         onProgress = { message -> debugLog("iAP tunnel $message") },
                     )
                     if (closed || generation != wirelessGeneration.get()) return@execute
+                    observeWirelessDisconnect(generation, null, AirPlayDisconnectEvidence(
+                        AirPlayDisconnectEvidence.Source.IAP2_TUNNEL,
+                        if (result.terminal == Iap2WirelessControlTerminal.TIMED_OUT) {
+                            AirPlayDisconnectEvidence.Reason.TIMEOUT
+                        } else AirPlayDisconnectEvidence.Reason.CHANNEL_CLOSED,
+                    ))
                     when (result.terminal) {
                         Iap2WirelessControlTerminal.TIMED_OUT ->
                             onStatus(CarPlayStatus.ControlEnded)
@@ -1310,6 +1321,9 @@ class CarPlayController(
                     }
                 } catch (error: Throwable) {
                     if (!closed && generation == wirelessGeneration.get()) {
+                        observeWirelessDisconnect(generation, null, AirPlayDisconnectEvidence.from(
+                            AirPlayDisconnectEvidence.Source.IAP2_TUNNEL, error,
+                        ))
                         debugLog("tunneled iAP2 control failed", error)
                         onStatus(
                             CarPlayStatus.Failed(
@@ -1334,6 +1348,7 @@ class CarPlayController(
         object : AirPlaySessionListener by sessionListener {
             override fun onSessionActive(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
+                wirelessDisconnects?.activate(generation, session)
                 wirelessConnectionProof.activate(generation, session)
                 wirelessMediaGuard?.activate(session)
                 sessionListener.onSessionActive(session)
@@ -1341,9 +1356,17 @@ class CarPlayController(
 
             override fun onSessionEnded(session: AirPlaySession) {
                 if (isStaleWirelessRun(generation)) return
+                observeWirelessDisconnect(generation, session, AirPlayDisconnectEvidence(
+                    AirPlayDisconnectEvidence.Source.SESSION, AirPlayDisconnectEvidence.Reason.UNSPECIFIED_CLOSE,
+                ))
+                wirelessDisconnects?.end(generation, session)
                 wirelessConnectionProof.end(generation, session)
                 wirelessMediaGuard?.end(session)
                 sessionListener.onSessionEnded(session)
+            }
+
+            override fun onDisconnectObserved(session: AirPlaySession?, evidence: AirPlayDisconnectEvidence) {
+                observeWirelessDisconnect(generation, session, evidence)
             }
 
             override fun onVideoFrameRendered(session: AirPlaySession) {
@@ -1358,6 +1381,27 @@ class CarPlayController(
             override fun onVideoPlaybackUiRequested(session: AirPlaySession) =
                 sessionListener.onVideoPlaybackUiRequested(session)
         }
+
+    private fun observeWirelessDisconnect(
+        generation: Int,
+        session: AirPlaySession?,
+        evidence: AirPlayDisconnectEvidence,
+    ) {
+        if (isStaleWirelessRun(generation)) return
+        val publish = onWirelessDisconnect ?: return
+        // The callback queues metadata only. Avoid Android service and disk calls in transport callbacks.
+        runCatching {
+            wirelessDisconnects?.observe(generation, session, evidence) { id, connectedAt ->
+                val elapsed = android.os.SystemClock.elapsedRealtime()
+                WirelessDisconnectObservation(
+                    id, generation, System.currentTimeMillis(), elapsed, (elapsed - connectedAt).coerceAtLeast(0),
+                    evidence, config.wirelessHotspotMode, config.useGeelyFactoryHotspot, wirelessHotspotSnapshot,
+                    wirelessHandoffRequested.get(), wirelessTunnelReady.get(), wirelessActiveReported.get(),
+                    bluetoothSocket != null || bluetoothStream != null,
+                )
+            }?.let(publish)
+        }
+    }
 
     private fun onWirelessTunnelReady(generation: Int) {
         if (
@@ -2112,6 +2156,8 @@ class CarPlayController(
     }
 
     private fun closeWirelessStack(service: CarPlayVpnService? = vpnService) {
+        wirelessDisconnects?.clear()
+        wirelessHotspotSnapshot = null
         val mediaGuard = wirelessMediaGuard
         wirelessMediaGuard = null
         wirelessConnectionProof.clear()

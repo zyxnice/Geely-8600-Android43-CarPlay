@@ -151,6 +151,7 @@ class CarPlayMediaEngine(
                         "screen stream ended type=$type reason=${cause?.message ?: "peer EOF"}",
                     )
                     if (streams.remove(streamKey, screen)) {
+                        session.observeDisconnect(AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.VIDEO, cause))
                         sink.onScreenStreamActive(type, false)
                         session.close()
                     }

@@ -3810,6 +3810,7 @@ class CarPlayHostActivity : ComponentActivity() {
         val pairings = AirPlayPersistence.loadPairings(this) { id, key ->
             AirPlayPersistence.savePairing(this, id, key)
         }
+        val appContext = applicationContext
         val next = CarPlayController(
             context = this,
             config = config,
@@ -3829,6 +3830,9 @@ class CarPlayHostActivity : ComponentActivity() {
                 null
             },
             geelyBluetoothEnabled = geelyBluetoothEnabled,
+            onWirelessDisconnect = if (wirelessEnabled) {
+                { event -> WirelessDisconnectReport.enqueue(appContext, event, renderer.mainScreenSubmittedFrameCount()) }
+            } else null,
         )
         controller = next
         CarPlayMediaKeys.attach(this, next)

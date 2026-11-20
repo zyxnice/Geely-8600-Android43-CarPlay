@@ -2034,6 +2034,7 @@ class DiPlayActivity : ComponentActivity() {
                     appendLine("Startup settings: openAfterBoot=${AirPlayPersistence.loadAutoStartOnBoot(appContext)} " +
                         "connectWhenOpened=${DiPlayPreferences.autoConnect(appContext)}")
                     appendLine()
+                    WirelessDisconnectReport.appendTo(this, appContext)
                     for (name in SessionLogFile.REPORT_NAMES) {
                         val file = File(appContext.filesDir, "logs/$name")
                         if (file.isFile) {

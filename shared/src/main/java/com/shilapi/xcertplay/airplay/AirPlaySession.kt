@@ -27,6 +27,7 @@ data class AirPlayDeviceInfo(
 interface AirPlaySessionListener {
     fun onSessionActive(session: AirPlaySession) {}
     fun onSessionEnded(session: AirPlaySession) {}
+    fun onDisconnectObserved(session: AirPlaySession?, evidence: AirPlayDisconnectEvidence) {}
     fun onVideoFrameRendered(session: AirPlaySession) {}
     fun onTransportError(message: String) {}
     fun onDeviceInfo(session: AirPlaySession, info: AirPlayDeviceInfo) {}
@@ -122,8 +123,20 @@ class AirPlaySession(
         }
     }
 
-    override fun close() {
+    override fun close() = closeAfterFailure(null)
+
+    internal fun observeDisconnect(evidence: AirPlayDisconnectEvidence) {
+        if (!closed.get()) notifyDisconnect(evidence)
+    }
+
+    private fun notifyDisconnect(evidence: AirPlayDisconnectEvidence) {
+        // Recording failure evidence must never interfere with socket or decoder cleanup.
+        runCatching { listener.onDisconnectObserved(this, evidence) }
+    }
+
+    internal fun closeAfterFailure(evidence: AirPlayDisconnectEvidence?) {
         if (!closed.compareAndSet(false, true)) return
+        evidence?.let(::notifyDisconnect)
         safeClose(socket)
         try {
             media.onSessionClosed(this)
@@ -209,7 +222,7 @@ class AirPlaySession(
             true
         } catch (error: Exception) {
             Log.w(TAG, "airplay event command failed type=${command["type"]}", error)
-            close()
+            closeAfterFailure(AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.EVENT_WRITE, error))
             false
         }
     }
@@ -335,16 +348,18 @@ class AirPlaySession(
 
     private fun runControl() {
         com.shilapi.xcertplay.network.TcpLiveness.configure(socket) { debugLog(it) }
-        val input = BufferedInputStream(socket.getInputStream())
-        val output = BufferedOutputStream(socket.getOutputStream())
         var accumulated = ByteArray(0)
         val buffer = ByteArray(READ_CHUNK_BYTES)
         var closeReason = "session closed"
+        var evidence: AirPlayDisconnectEvidence? = null
         try {
+            val input = BufferedInputStream(socket.getInputStream())
+            val output = BufferedOutputStream(socket.getOutputStream())
             while (!closed.get()) {
                 val count = input.read(buffer)
                 if (count < 0) {
                     closeReason = "peer EOF"
+                    evidence = AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.CONTROL, null)
                     break
                 }
                 var plaintext = buffer.copyOf(count)
@@ -355,6 +370,9 @@ class AirPlaySession(
                         activeCipher.decrypt(encBuf)
                     } catch (error: Exception) {
                         closeReason = "control decrypt failed: ${error.message ?: error.javaClass.simpleName}"
+                        evidence = AirPlayDisconnectEvidence.from(
+                            AirPlayDisconnectEvidence.Source.CONTROL, error, AirPlayDisconnectEvidence.Reason.DECRYPT_FAILED,
+                        )
                         Log.e(TAG, "airplay $closeReason encrypted=${encBuf.size}", error)
                         break
                     }
@@ -406,10 +424,11 @@ class AirPlaySession(
             }
         } catch (error: Exception) {
             closeReason = "control I/O failed: ${error.message ?: error.javaClass.simpleName}"
+            evidence = AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.CONTROL, error)
             if (!closed.get()) Log.e(TAG, "airplay $closeReason", error)
         } finally {
             debugLog("airplay control closing reason=$closeReason activeStreams=$activeStreams")
-            close()
+            closeAfterFailure(evidence)
         }
     }
 
@@ -630,6 +649,12 @@ class AirPlaySession(
         )
         trace("airplay TEARDOWN raw${request.body.size}Hex=${request.body.toHex()}")
 
+        if (STREAM_TYPE_MAIN_SCREEN in activeStreams && (types == null || STREAM_TYPE_MAIN_SCREEN in types)) {
+            observeDisconnect(AirPlayDisconnectEvidence(
+                AirPlayDisconnectEvidence.Source.CONTROL, AirPlayDisconnectEvidence.Reason.PEER_TEARDOWN,
+            ))
+        }
+
         if (types == null) {
             activeStreams.toList().forEach { media.onTeardown(this, it) }
             activeStreams.clear()
@@ -726,12 +751,14 @@ class AirPlaySession(
         } catch (error: Exception) {
             if (!closed.get()) {
                 Log.e(TAG, "airplay event accept failed", error)
-                close()
+                closeAfterFailure(AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.EVENT_ACCEPT, error))
             }
         }
     }
 
     private fun runEventRead(socket: Socket) {
+        val source = AirPlayDisconnectEvidence.Source.EVENT_READ
+        var evidence: AirPlayDisconnectEvidence? = null
         try {
             val input = BufferedInputStream(socket.getInputStream())
             val output = BufferedOutputStream(socket.getOutputStream())
@@ -740,13 +767,17 @@ class AirPlaySession(
             val buffer = ByteArray(READ_CHUNK_BYTES)
             while (!closed.get()) {
                 val count = input.read(buffer)
-                if (count < 0) break
+                if (count < 0) {
+                    evidence = AirPlayDisconnectEvidence.from(source, null)
+                    break
+                }
                 val cipher = eventCipher ?: break
                 encrypted += buffer.copyOf(count)
                 val decrypted = try {
                     cipher.decrypt(encrypted)
                 } catch (error: Exception) {
                     Log.e(TAG, "airplay event decrypt failed encrypted=${encrypted.size}", error)
+                    evidence = AirPlayDisconnectEvidence.from(source, error, AirPlayDisconnectEvidence.Reason.DECRYPT_FAILED)
                     break
                 }
                 encrypted = decrypted.rest
@@ -779,13 +810,14 @@ class AirPlaySession(
                 }
             }
         } catch (error: Exception) {
+            evidence = AirPlayDisconnectEvidence.from(source, error)
             if (!closed.get()) Log.e(TAG, "airplay event read failed", error)
         } finally {
             debugLog("airplay event connection closed")
             if (eventSocket === socket) eventSocket = null
             eventCipher = null
             safeClose(socket)
-            if (!closed.get()) close()
+            closeAfterFailure(evidence)
         }
     }
 

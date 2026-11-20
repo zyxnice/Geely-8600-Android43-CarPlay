@@ -8,6 +8,7 @@ import android.os.IBinder
 import android.os.ParcelFileDescriptor
 import android.util.Log
 import com.shilapi.xcertplay.airplay.AirPlayConfig
+import com.shilapi.xcertplay.airplay.AirPlayDisconnectEvidence
 import com.shilapi.xcertplay.airplay.AirPlayIdentity
 import com.shilapi.xcertplay.airplay.AirPlayMediaHandler
 import com.shilapi.xcertplay.airplay.AirPlaySession
@@ -338,6 +339,10 @@ class CarPlayVpnService : VpnService() {
             {
                 synchronized(this) {
                     if (generation != attachGeneration) return@Thread
+                    runCatching {
+                        listener.onDisconnectObserved(null,
+                            AirPlayDisconnectEvidence.from(AirPlayDisconnectEvidence.Source.LISTENER, error))
+                    }
                     releaseLocked()
                 }
                 listener.onTransportError(message)

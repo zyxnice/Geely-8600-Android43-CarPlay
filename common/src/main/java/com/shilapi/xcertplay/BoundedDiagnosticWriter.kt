@@ -6,6 +6,7 @@ import java.util.ArrayDeque
 /** One daemon writer, with at most [maxPending] queued entries plus its active write. */
 internal class BoundedDiagnosticWriter<T : Any>(
     private val maxPending: Int = 64,
+    threadName: String = "diplay-diagnostic-writer",
     private val write: (T) -> Unit,
 ) : Closeable {
     private val monitor = Object()
@@ -16,7 +17,7 @@ internal class BoundedDiagnosticWriter<T : Any>(
 
     init {
         require(maxPending > 0)
-        Thread(::drain, "diplay-diagnostic-writer").apply {
+        Thread(::drain, threadName).apply {
             isDaemon = true
             start()
         }

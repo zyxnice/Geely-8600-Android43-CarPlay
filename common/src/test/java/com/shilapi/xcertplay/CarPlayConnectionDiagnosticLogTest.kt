@@ -1,8 +1,12 @@
 package com.shilapi.xcertplay
 
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import com.shilapi.xcertplay.airplay.AirPlaySessionListener
 import com.shilapi.xcertplay.orchestration.CarPlayController
 import com.shilapi.xcertplay.compat.GeelyMediaOptions
+import com.shilapi.xcertplay.host.R
 import com.shilapi.xcertplay.media.AndroidMediaSink
 import java.io.Closeable
 import java.io.File
@@ -56,6 +60,19 @@ class CarPlayConnectionDiagnosticLogTest {
         listener.onDebugLog("${CarPlayController.CONNECTION_DIAGNOSTIC_PREFIX} attempt=1 token=private-token")
         assertTrue(AsyncDiagnosticLog.awaitIdle(2_000))
         assertFalse(log.contains("private-token"))
+    }
+
+    @Test fun connectionPanelDistinguishesOpeningFromRetry() {
+        activity.javaClass.getDeclaredMethod("buildCarPlayConnectionPanel").apply { isAccessible = true }.invoke(activity)
+        val title = activity.javaClass.getDeclaredField("connectionTitleView").apply { isAccessible = true }
+            .get(activity) as TextView
+        val actions = activity.javaClass.getDeclaredField("connectionActions").apply { isAccessible = true }
+            .get(activity) as LinearLayout
+        val retry = (0 until actions.childCount).map { actions.getChildAt(it) as Button }
+            .first { it.text == activity.getString(R.string.diplay_retry_connection) }
+        assertEquals(activity.getString(R.string.diplay_opening_carplay), title.text)
+        assertTrue(retry.performClick())
+        assertEquals(activity.getString(R.string.diplay_reopening_carplay), title.text)
     }
 
     @Test(timeout = 10_000) fun aacCallbackReturnsWhileSessionFileIsBlocked() {

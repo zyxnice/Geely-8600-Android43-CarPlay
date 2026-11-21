@@ -9,7 +9,7 @@
 `1.1.0-H53-LOG` / versionCode 30。下述 `-PgeelyPerformanceStage=B` 命令可直接构建 1.1。
 这两个属性是已有试验构建命令的兼容入口，功能在运行时仍匹配指定 H53 设备和无线会话。
 需要关闭无线试验、使用原 USB 功能配置时显式传入 `-PgeelyWifiTrial=false`，日志对照属性随之默认关闭；版本仍为 1.1.0，后缀随 USB 配置选择，不能将其视为原始 1.0 APK。
-`-PgeelyWifiQuiet=true` 使用 NOLOG 构建，可用 `scripts/verify-geely-quiet-apk.py` 对实际 APK 核查日志裁剪。
+`-PgeelyWifiQuiet=true` 构建 CAP520 NOLOG 测试包 DiPlay1.2（versionName `1.2`、versionCode `32`）。车机宽屏版使用左侧竖排连接方式，按连接状态显示等待、重试或热点设置入口。该变体排除三个 Bouncy Castle Picnic 数据文件，仍保留 500 条 Wi-Fi 断连记录。可用 `scripts/verify-geely-quiet-apk.py` 对 APK 核查日志裁剪。
 以下 2026-11-13 的开关撤回描述属于原始 1.0 发布记录。
 
 2026-11-13 后续确认：当前 APK 已按用户验收定为 [1.0 正式版](RELEASE-1.0-20261113.md)，

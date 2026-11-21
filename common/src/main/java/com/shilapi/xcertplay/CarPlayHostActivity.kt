@@ -95,7 +95,7 @@ import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicBoolean
 
-internal const val EXTRA_OFFER_WIRELESS_SWITCH = "com.shilapi.xcertplay.OFFER_WIRELESS_SWITCH"
+internal const val EXTRA_OFFER_TRANSPORT_SWITCH = "com.shilapi.xcertplay.OFFER_TRANSPORT_SWITCH"
 internal const val EXTRA_TRANSPORT_WIRELESS = "com.shilapi.xcertplay.TRANSPORT_WIRELESS"
 
 /**
@@ -113,20 +113,30 @@ class CarPlayHostActivity : ComponentActivity() {
     )
 
     private var connectionPanel: View? = null
-    private var wideConnectionPanel: View? = null
+    private var connectionLogPanel: View? = null
+    private var connectionActions: LinearLayout? = null
+    private var connectionRail: DiPlayTransportRail? = null
+    private var connectionRetryButton: Button? = null
+    private var connectionStopButton: Button? = null
+    private var connectionHotspotButton: Button? = null
+    private var connectionSettingsButton: Button? = null
+    private var connectionTitleView: TextView? = null
+    private var connectionTransportView: ImageView? = null
+    private var connectionTransportLabelView: TextView? = null
+    private var connectionCompactReportButton: View? = null
+    private var retryingConnection = false
     private var usbWaitingPanel: FrameLayout? = null
     private var showUsbWaitDetails = false
     private val keyDiagnostics = ConnectionKeyDiagnostics()
     private var keyDiagnosticsView: TextView? = null
     private var connectionReportSaving = false
-    private var wideStageView: TextView? = null
-    private var wideGuidanceView: TextView? = null
-    private var wideElapsedView: TextView? = null
-    private var wideFailureView: TextView? = null
-    private var wideConfirmedStageView: TextView? = null
-    private var wideWifiRecoveryButton: View? = null
+    private var connectionStageView: TextView? = null
+    private var connectionGuidanceView: TextView? = null
+    private var connectionElapsedView: TextView? = null
+    private var connectionFailureView: TextView? = null
+    private var connectionConfirmedStageView: TextView? = null
+    private var connectionWifiRecoveryButton: View? = null
     private var latestLogButton: Button? = null
-    private var wifiRecoveryButton: View? = null
     private var reconnectAttempts = 0
     private lateinit var airPlayIdentity: AirPlayIdentity
     private var languagePreferenceAtCreate = AppLocale.SYSTEM
@@ -290,7 +300,6 @@ class CarPlayHostActivity : ComponentActivity() {
     private var programmaticLogScroll = false
     private var logRefreshScheduled = false
     @Volatile private var hostUiDestroyed = false
-    private var stageStatusView: TextView? = null
     private var resolutionValueView: TextView? = null
     private var resolutionPreviewView: TextView? = null
     private var hotspotStatusView: TextView? = null
@@ -413,11 +422,11 @@ class CarPlayHostActivity : ComponentActivity() {
         if (hostUiDestroyed || currentConnectionStatus == null || currentStageStartedAtMillis == 0L) return@Runnable
         val elapsed = System.currentTimeMillis() - currentStageStartedAtMillis
         if (elapsed >= STAGE_STALL_NOTICE_MILLIS) {
-            wideElapsedView?.text = connectionUiText(
+            connectionElapsedView?.text = connectionUiText(
                 "此阶段已持续超过 ${elapsed / 1000} 秒；当前尚未确认原因。请查看右侧最新日志。",
                 "This stage has lasted ${elapsed / 1000}s; the cause is not confirmed. Check the latest log entries.",
             )
-            wideElapsedView?.visibility = View.VISIBLE
+            connectionElapsedView?.visibility = View.VISIBLE
         }
     }
     // Some head units (e.g. BYD DiLink) update resources.configuration for day/night
@@ -1053,7 +1062,7 @@ class CarPlayHostActivity : ComponentActivity() {
         super.onConfigurationChanged(newConfig)
         refreshConfiguration(newConfig)
         applyFullscreenMode()
-        stageStatusView?.maxWidth = (resources.displayMetrics.widthPixels * 0.78f).toInt()
+        reflowConnectionActions()
         usbWaitingPanel?.removeAllViews()
         updateDebugOverlays()
         scrollLogsToBottom()
@@ -1114,57 +1123,7 @@ class CarPlayHostActivity : ComponentActivity() {
         com.shilapi.xcertplay.media.H52LegacySurface.install(this, root, video)
         root.addView(video, FrameLayout.LayoutParams(-1, -1))
         root.addView(gestureLayer, FrameLayout.LayoutParams(-1, -1))
-        val panel = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(32), dp(32), dp(32), dp(32))
-            setBackgroundColor(Color.rgb(12, 17, 27))
-            isClickable = true
-        }
-        panel.addView(ImageView(this).apply {
-            setImageResource(R.drawable.ic_carplay); contentDescription = getString(R.string.carplay)
-        }, LinearLayout.LayoutParams(dp(88), dp(88)))
-        panel.addView(TextView(this).apply {
-            text = getString(R.string.diplay); textSize = 34f; setTextColor(Color.rgb(241, 245, 252))
-            gravity = Gravity.CENTER; setPadding(0, dp(18), 0, dp(14))
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        })
-        val stage = TextView(this).apply {
-            text = getString(R.string.getting_carplay_ready); textSize = 22f; gravity = Gravity.CENTER
-            setTextColor(Color.rgb(241, 245, 252))
-        }
-        panel.addView(stage)
-        panel.addView(TextView(this).apply {
-            text = if (wirelessEnabled) getString(R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow)
-                else getString(R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an)
-            textSize = 17f; gravity = Gravity.CENTER; setTextColor(Color.rgb(168, 182, 202))
-            setPadding(0, dp(14), 0, dp(24))
-        })
-        panel.addView(Button(this).apply {
-            text = getString(R.string.reset_carplay_wi_fi); isAllCaps = false; textSize = 18f
-            visibility = View.GONE
-            setOnClickListener { showDiPlayHome("wireless-recovery") }
-            wifiRecoveryButton = this
-        }, LinearLayout.LayoutParams(dp(300), dp(64)).apply { bottomMargin = dp(12) })
-        panel.addView(Button(this).apply {
-            text = getString(R.string.back_to_diplay); isAllCaps = false; textSize = 18f
-            setTextColor(Color.rgb(12, 17, 27))
-            background = GradientDrawable().apply { setColor(Color.rgb(166, 200, 255)); cornerRadius = dp(20).toFloat() }
-            setOnClickListener { showDiPlayHome() }
-        }, LinearLayout.LayoutParams(dp(300), dp(64)))
-        panel.addView(TextView(this).apply {
-            text = getString(R.string.in_carplay_swipe_down_with_three_fingers_to_open_diplay_se)
-            textSize = 13f; gravity = Gravity.CENTER; setTextColor(Color.rgb(168, 182, 202)); setPadding(0, dp(20), 0, 0)
-        })
-        panel.addView(Button(this).apply {
-            text = connectionUiText("保存诊断报告", "Save report")
-            isAllCaps = false
-            contentDescription = "connection-save-report-narrow"
-            visibility = if (RuntimeDiagnostics.enabled()) View.VISIBLE else View.GONE
-            setOnClickListener { saveConnectionReport() }
-        }, LinearLayout.LayoutParams(dp(300), dp(56)))
-        root.addView(panel, FrameLayout.LayoutParams(-1, -1))
-        root.addView(buildWideConnectionPanel(), FrameLayout.LayoutParams(-1, -1))
+        root.addView(buildCarPlayConnectionPanel(), FrameLayout.LayoutParams(-1, -1))
         usbWaitingPanel = FrameLayout(this).apply {
             visibility = View.GONE
             setBackgroundColor(DiPlayBackground)
@@ -1178,158 +1137,217 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         videoView = video
         gestureOverlay = gestureLayer
-        stageStatusView = stage
-        connectionPanel = panel
         updateDebugOverlays()
         return root
     }
 
-    /** Wide 16:9 and wider head units use this connection surface until video is active. */
-    private fun buildWideConnectionPanel(): View {
-        val overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.argb(150, 0, 0, 0))
+    /** Shares the connection layout across screen sizes. The optional log gets its own wide column. */
+    private fun buildCarPlayConnectionPanel(): View {
+        val overlay = diPlayColumn().apply {
+            setBackgroundColor(DiPlayBackground)
             isClickable = true
             contentDescription = "connection-panel"
         }
-        val columns = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            setPadding(dp(22), dp(22), dp(22), dp(22))
+        overlay.addView(diPlayPageHeader(
+            connectionSelected = true,
+            settingsSelected = false,
+            onConnection = { showDiPlayHome() },
+            onSettings = ::openSettingsMenu,
+            onCarHome = { startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)) },
+        ))
+        val wide = diPlayLayoutWidth() >= 860
+        val body = diPlayRow().apply {
+            val inset = dp(if (wide) 48 else 12)
+            setPadding(inset, dp(22), inset, dp(28))
         }
-        val leftContent = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
+        val rail = DiPlayTransportRail(this, true) { target ->
+            if (target != wirelessEnabled) showDiPlayHome(offerTransport = target)
+        }.also { connectionRail = it }
+        body.addView(rail, LinearLayout.LayoutParams(0, -1, .25f).apply { marginEnd = dp(24) })
+        val card = diPlayColumn().apply {
+            val inset = dp(if (wide) 32 else 14)
+            setPadding(inset, inset, inset, inset)
+            background = diPlayCard(DiPlaySurface, DiPlayBorder)
+        }
+        val details = diPlayColumn()
+        val transport = diPlayLabel(connectionTransportLabel(), if (wide) 22f else 16f, DiPlayAccent, true)
+        connectionTransportLabelView = transport
+        details.addView(transport, LinearLayout.LayoutParams(-1, -2))
+        val summary = diPlayColumn().apply {
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(28), dp(24), dp(28), dp(24))
-            setBackgroundColor(Color.argb(238, 12, 17, 27))
+            setPadding(0, dp(12), 0, dp(12))
         }
-        leftContent.addView(TextView(this).apply {
-            text = getString(R.string.diplay)
-            textSize = 28f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(Color.rgb(241, 245, 252))
-            contentDescription = "connection-title"
-        }, LinearLayout.LayoutParams(-1, -2))
-        leftContent.addView(TextView(this).apply {
-            text = connectionUiText("连接状态", "Connection status")
-            textSize = 15f
-            setTextColor(Color.rgb(150, 168, 190))
-            setPadding(0, dp(18), 0, dp(8))
-        }, LinearLayout.LayoutParams(-1, -2))
-        val stage = TextView(this).apply {
-            text = connectionUiText("正在准备 CarPlay", "Preparing CarPlay")
-            textSize = 25f
-            typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            setTextColor(Color.rgb(241, 245, 252))
-            contentDescription = "connection-stage"
-            maxLines = 3
-        }
-        wideStageView = stage
-        leftContent.addView(stage, LinearLayout.LayoutParams(-1, -2))
-        val guidance = TextView(this).apply {
-            text = connectionUiText("等待连接阶段状态。", "Waiting for a connection stage.")
-            textSize = 18f
-            setTextColor(Color.rgb(190, 204, 222))
-            setPadding(0, dp(12), 0, dp(4))
-            contentDescription = "connection-guidance"
-            maxLines = 5
-        }
-        wideGuidanceView = guidance
-        leftContent.addView(guidance, LinearLayout.LayoutParams(-1, -2))
-        val keyDetails = TextView(this).apply {
-            textSize = 16f
-            setTextColor(Color.rgb(242, 196, 96))
-            setPadding(0, dp(8), 0, dp(4))
-            contentDescription = "connection-key-diagnostics"
-            text = keyDiagnostics.summary()
+        val hero = diPlayRow().apply { gravity = Gravity.CENTER_VERTICAL }
+        val icon = diPlayIconTile(connectionTransportIcon(), if (wide) 28 else 12)
+        connectionTransportView = icon
+        val iconSize = dp(if (wide) 100 else 46)
+        hero.addView(icon, LinearLayout.LayoutParams(iconSize, iconSize).apply {
+            marginEnd = dp(if (wide) 27 else 12)
+        })
+        val copy = diPlayColumn()
+        val title = diPlayLabel(getString(R.string.diplay_opening_carplay), if (wide) 49f else 28f, DiPlayText, true)
+        if (Build.VERSION.SDK_INT >= 19) title.accessibilityLiveRegion = View.ACCESSIBILITY_LIVE_REGION_POLITE
+        connectionTitleView = title
+        copy.addView(title)
+        val stage = diPlayLabel("", if (wide) 23f else 16f, DiPlayMuted)
+        connectionStageView = stage
+        copy.addView(stage, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        val guidance = diPlayLabel(defaultConnectionGuidance(), if (wide) 23f else 16f, DiPlayMuted)
+        connectionGuidanceView = guidance
+        copy.addView(guidance, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(7) })
+        hero.addView(copy, LinearLayout.LayoutParams(0, -2, 1f))
+        summary.addView(hero, LinearLayout.LayoutParams(-1, -2))
+
+        val keyDetails = diPlayLabel(keyDiagnostics.summary(), 15f, DiPlayMuted).apply {
             visibility = if (text.isEmpty()) View.GONE else View.VISIBLE
         }
         keyDiagnosticsView = keyDetails
-        leftContent.addView(keyDetails, LinearLayout.LayoutParams(-1, -2))
-        val elapsed = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.rgb(242, 196, 96))
+        summary.addView(keyDetails, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        val warning = Color.rgb(243, 206, 139)
+        val elapsed = diPlayLabel("", 15f, warning).apply { visibility = View.GONE }
+        connectionElapsedView = elapsed
+        summary.addView(elapsed, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        val confirmed = diPlayLabel("", 15f, DiPlayMuted).apply { visibility = View.GONE }
+        connectionConfirmedStageView = confirmed
+        summary.addView(confirmed, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(8) })
+        val failure = diPlayLabel("", 16f, Color.rgb(255, 192, 177)).apply {
             visibility = View.GONE
-            setPadding(0, dp(8), 0, dp(4))
-            contentDescription = "connection-stage-elapsed"
-            maxLines = 2
-        }
-        wideElapsedView = elapsed
-        leftContent.addView(elapsed, LinearLayout.LayoutParams(-1, -2))
-        val confirmed = TextView(this).apply {
-            textSize = 14f
-            setTextColor(Color.rgb(146, 190, 160))
-            setPadding(0, dp(6), 0, dp(4))
-            contentDescription = "connection-last-confirmed-stage"
-            visibility = View.GONE
-            maxLines = 2
-        }
-        wideConfirmedStageView = confirmed
-        leftContent.addView(confirmed, LinearLayout.LayoutParams(-1, -2))
-        val failure = TextView(this).apply {
-            textSize = 15f
-            setTextColor(Color.rgb(255, 184, 166))
+            background = diPlayCard(Color.rgb(56, 39, 46), Color.rgb(124, 77, 85))
             setPadding(dp(14), dp(10), dp(14), dp(10))
-            background = GradientDrawable().apply {
-                setColor(Color.argb(150, 107, 35, 30))
-                cornerRadius = dp(10).toFloat()
-            }
-            visibility = View.GONE
-            contentDescription = "connection-last-failure"
-            maxLines = 8
         }
-        wideFailureView = failure
-        leftContent.addView(failure, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(14) })
-
-        val wifiRecovery = Button(this).apply {
-            text = getString(R.string.reset_carplay_wi_fi)
-            isAllCaps = false
-            textSize = 17f
-            visibility = View.GONE
-            setOnClickListener { showDiPlayHome("wireless-recovery") }
-            contentDescription = "connection-wifi-recovery"
-        }
-        wideWifiRecoveryButton = wifiRecovery
-        leftContent.addView(wifiRecovery, LinearLayout.LayoutParams(-1, dp(54)).apply { topMargin = dp(18) })
-        leftContent.addView(Button(this).apply {
-            text = connectionUiText("重试连接", "Retry connection")
-            isAllCaps = false
-            textSize = 18f
-            contentDescription = "connection-retry"
-            setOnClickListener {
-                if (controller == null) maybeStartCarPlay() else restartCarPlay("User requested connection retry")
-            }
-        }, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(18) })
-        leftContent.addView(Button(this).apply {
-            text = getString(R.string.carplay_settings)
-            isAllCaps = false
-            textSize = 18f
-            contentDescription = "connection-open-settings"
-            setOnClickListener { openSettingsMenu() }
-        }, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(18) })
-        leftContent.addView(Button(this).apply {
-            text = getString(R.string.back_to_diplay)
-            isAllCaps = false
-            textSize = 18f
-            contentDescription = "connection-return-home"
-            setOnClickListener { showDiPlayHome() }
-        }, LinearLayout.LayoutParams(-1, dp(58)).apply { topMargin = dp(10) })
-
-        val leftScroll = ScrollView(this).apply {
-            isFillViewport = true
-            addView(leftContent, FrameLayout.LayoutParams(-1, -2))
-            contentDescription = "connection-actions-scroll"
+        connectionFailureView = failure
+        summary.addView(failure, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(10) })
+        connectionWifiRecoveryButton = diPlayButton(getString(R.string.reset_carplay_wi_fi)) {
+            showDiPlayHome("wireless-recovery")
+        }.apply { visibility = View.GONE }.also {
+            summary.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
         }
         if (RuntimeDiagnostics.enabled()) {
-            columns.addView(leftScroll, LinearLayout.LayoutParams(0, -1, 0.40f).apply { rightMargin = dp(12) })
-            columns.addView(
-                buildConnectionLogPanel(),
-                LinearLayout.LayoutParams(0, -1, 0.60f).apply { leftMargin = dp(12) },
-            )
-        } else {
-            columns.addView(leftScroll, LinearLayout.LayoutParams(-1, -1))
+            connectionCompactReportButton = diPlayButton(getString(R.string.save_diagnostic_report)) {
+                saveConnectionReport()
+            }.also {
+                summary.addView(it, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+            }
         }
-        overlay.addView(columns, FrameLayout.LayoutParams(-1, -1))
-        wideConnectionPanel = overlay
+        details.addView(summary, LinearLayout.LayoutParams(-1, -2, 1f))
+        val scroll = ScrollView(this).apply {
+            isFillViewport = true
+            addView(details, FrameLayout.LayoutParams(-1, -2))
+        }
+        card.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
+
+        val actions = diPlayRow()
+        val retry = diPlayButton(getString(R.string.diplay_retry_connection)) {
+            retryingConnection = true
+            updateConnectionTitle()
+            if (controller == null) maybeStartCarPlay() else restartCarPlay("User requested connection retry")
+        }
+        connectionRetryButton = retry
+        val stop = diPlayButton(getString(R.string.diplay_cancel_wait)) {
+            if (!CarPlayBackgroundSession.isStopping()) CarPlayBackgroundSession.stop { showDiPlayHome() }
+        }
+        connectionStopButton = stop
+        val hotspot = diPlayButton(getString(R.string.open_car_hotspot_settings), DiPlayButtonStyle.PRIMARY) {
+            showDiPlayHome(if (hotspotRecovery() == HotspotRecovery.OPEN_SETTINGS) "car-hotspot-settings" else "connection")
+        }
+        connectionHotspotButton = hotspot
+        val settings = diPlayButton(getString(R.string.settings), click = ::openSettingsMenu)
+        connectionSettingsButton = settings
+        listOf(hotspot, retry, stop, settings, diPlayButton(getString(R.string.back_to_diplay)) {
+            showDiPlayHome()
+        }).forEach {
+            if (wide) {
+                it.minimumHeight = dp(68)
+                it.textSize = 23f
+            }
+            actions.addView(it)
+        }
+        connectionActions = actions
+        card.addView(actions, LinearLayout.LayoutParams(-1, -2).apply { topMargin = dp(12) })
+        body.addView(card, LinearLayout.LayoutParams(0, -1, if (RuntimeDiagnostics.enabled()) 1f else .75f))
+
+        if (RuntimeDiagnostics.enabled()) {
+            connectionLogPanel = buildConnectionLogPanel().also { logs ->
+                body.addView(logs, LinearLayout.LayoutParams(0, -1, 1.25f).apply { marginStart = dp(16) })
+            }
+        }
+        overlay.addView(body, LinearLayout.LayoutParams(-1, 0, 1f))
+        reflowConnectionActions()
+        connectionPanel = overlay
         return overlay
+    }
+
+    private fun reflowConnectionActions() {
+        val actions = connectionActions ?: return
+        val showLogs = connectionLogPanel != null && isWideConnectionSurface()
+        val actionWidth = diPlayLayoutWidth() * if (showLogs) (1f / 2.25f) else 1f
+        val inline = actionWidth >= 460
+        actions.orientation = if (inline) LinearLayout.HORIZONTAL else LinearLayout.VERTICAL
+        for (index in 0 until actions.childCount) {
+            actions.getChildAt(index).layoutParams = if (inline) {
+                LinearLayout.LayoutParams(-2, -2).apply { marginEnd = dp(10) }
+            } else {
+                LinearLayout.LayoutParams(-1, -2).apply { if (index > 0) topMargin = dp(6) }
+            }
+        }
+    }
+
+    private fun connectionTransportIcon() = if (wirelessEnabled) R.drawable.ic_dp_connection else R.drawable.ic_dp_usb
+
+    private fun connectionTransportLabel() = "${getString(R.string.carplay)} · ${if (wirelessEnabled) "Wi-Fi" else "USB"}"
+
+    private fun defaultConnectionGuidance() = getString(
+        if (wirelessEnabled) R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow
+        else R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an,
+    )
+
+    private enum class HotspotRecovery { OPEN_SETTINGS, CONFIGURE }
+
+    private fun hotspotRecovery(): HotspotRecovery? {
+        if (!wirelessEnabled) return null
+        val message = (currentConnectionStatus as? CarPlayStatus.Failed)?.message?.lowercase(Locale.US) ?: return null
+        return when {
+            "the car hotspot is off" in message -> HotspotRecovery.OPEN_SETTINGS
+            "manualhotspotssid is required" in message || "manualhotspotpassphrase" in message ||
+                "manual hotspot ssid does not match" in message -> HotspotRecovery.CONFIGURE
+            else -> null
+        }
+    }
+
+    private fun updateConnectionTitle() {
+        val label = connectionTitleView ?: return
+        val recovery = hotspotRecovery()
+        val failed = currentConnectionStatus is CarPlayStatus.Failed && !reconnectScheduled
+        val retrying = retryingConnection || reconnectScheduled
+        val title = getString(when {
+            recovery == HotspotRecovery.OPEN_SETTINGS -> R.string.diplay_car_hotspot_off
+            recovery == HotspotRecovery.CONFIGURE -> R.string.diplay_configure_hotspot_title
+            failed -> R.string.diplay_connection_failed
+            retrying -> R.string.diplay_reopening_carplay
+            else -> R.string.diplay_opening_carplay
+        })
+        if (label.text != title) label.text = title
+        label.setTextColor(if (failed || recovery != null) Color.rgb(255, 201, 146) else DiPlayText)
+        val waiting = !failed && recovery == null
+        connectionRetryButton?.visibility = if (waiting) View.GONE else View.VISIBLE
+        connectionStopButton?.let {
+            val text = getString(if (retrying) R.string.diplay_stop_reconnecting else R.string.diplay_cancel_wait)
+            if (it.text != text) it.text = text
+            it.visibility = if (waiting) View.VISIBLE else View.GONE
+        }
+        connectionHotspotButton?.let {
+            val text = getString(if (recovery == HotspotRecovery.CONFIGURE) R.string.diplay_configure_hotspot
+                else R.string.open_car_hotspot_settings)
+            if (it.text != text) it.text = text
+            it.visibility = if (recovery != null) View.VISIBLE else View.GONE
+        }
+        connectionSettingsButton?.visibility = if (recovery == null) View.VISIBLE else View.GONE
+        connectionStageView?.visibility =
+            if (recovery != null || retrying) View.GONE else View.VISIBLE
+        if (retrying && waiting) {
+            connectionGuidanceView?.text = getString(if (wirelessEnabled) R.string.diplay_reconnect_wifi_hint
+                else R.string.diplay_reconnect_usb_hint)
+        }
     }
 
     private fun buildConnectionLogPanel(): View {
@@ -3593,19 +3611,18 @@ class CarPlayHostActivity : ComponentActivity() {
                         "CarPlay 会话已建立",
                         "CarPlay session active",
                     )
-                    stageStatusView?.text = activeTitle
-                    wideStageView?.text = activeTitle
-                    wideGuidanceView?.text = connectionUiText(
+                    connectionStageView?.text = activeTitle
+                    connectionGuidanceView?.text = connectionUiText(
                         "会话已建立；主视频流出现后将切换为全屏 CarPlay。",
                         "The session is active; full-screen CarPlay appears when the main video stream starts.",
                     )
                     lastConfirmedStage = connectionUiText("CarPlay 会话已建立", "CarPlay session established")
-                    wideFailureView?.visibility = View.GONE
-                    wideConfirmedStageView?.text = connectionUiText(
+                    connectionFailureView?.visibility = View.GONE
+                    connectionConfirmedStageView?.text = connectionUiText(
                         "最近确认节点：${lastConfirmedStage}",
                         "Last confirmed milestone: ${lastConfirmedStage}",
                     )
-                    wideConfirmedStageView?.visibility = View.VISIBLE
+                    connectionConfirmedStageView?.visibility = View.VISIBLE
                     syncAirPlayDarkMode()
                     updateDebugOverlays()
                     if (menuOpen) return@runOnUiThread
@@ -3679,16 +3696,13 @@ class CarPlayHostActivity : ComponentActivity() {
                 renderConnectionStatus(status, description)
                 when (status) {
                     is CarPlayStatus.Failed -> if (status.wifiResetRequired) {
-                        wifiRecoveryButton?.visibility = View.VISIBLE
-                        wideWifiRecoveryButton?.visibility = View.VISIBLE
+                        connectionWifiRecoveryButton?.visibility = View.VISIBLE
                     } else {
-                        wifiRecoveryButton?.visibility = View.GONE
-                        wideWifiRecoveryButton?.visibility = View.GONE
-                        reconnectAfterLoss(description)
+                        connectionWifiRecoveryButton?.visibility = View.GONE
+                        if (hotspotRecovery() == null) reconnectAfterLoss(description)
                     }
                     else -> {
-                        wifiRecoveryButton?.visibility = View.GONE
-                        wideWifiRecoveryButton?.visibility = View.GONE
+                        connectionWifiRecoveryButton?.visibility = View.GONE
                     }
                 }
             }
@@ -4031,6 +4045,8 @@ class CarPlayHostActivity : ComponentActivity() {
         if (shuttingDown.get() || menuOpen || handshakeResetInProgress) return
         if (reconnectScheduled) return
         reconnectScheduled = true
+        retryingConnection = true
+        updateConnectionTitle()
         val generation = restartGeneration
         val delayMillis = if (WiredStartupRecovery.fastRetry(
                 wired = !wirelessEnabled,
@@ -4070,7 +4086,8 @@ class CarPlayHostActivity : ComponentActivity() {
         val size = activeDisplaySize ?: return
         appendLog(reason)
         activeScreenStreamTypes.clear()
-        setConnectionStage(reason)
+        retryingConnection = true
+        setConnectionStage(getString(R.string.getting_carplay_ready))
         Log.i(TAG, "$reason; rebuilding stack at ${size.width}x${size.height}")
         val generation = ++restartGeneration
         handshakeResetInProgress = true
@@ -4108,11 +4125,11 @@ class CarPlayHostActivity : ComponentActivity() {
         }
     }
 
-    private fun showDiPlayHome(page: String = "home", offerWirelessSwitch: Boolean = false) {
+    private fun showDiPlayHome(page: String = "home", offerTransport: Boolean? = null) {
         controller?.sendTouch(emptyList())
         startActivity(Intent(this, DiPlayActivity::class.java)
             .putExtra("page", page)
-            .putExtra(EXTRA_OFFER_WIRELESS_SWITCH, offerWirelessSwitch)
+            .apply { if (offerTransport != null) putExtra(EXTRA_OFFER_TRANSPORT_SWITCH, offerTransport) }
             .addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT))
     }
 
@@ -4314,6 +4331,7 @@ class CarPlayHostActivity : ComponentActivity() {
             if (shuttingDown.get() || generation != restartGeneration) return@runOnUiThread
             if (active) {
                 activeScreenStreamTypes.add(type)
+                if (type == SCREEN_TYPE_MAIN) retryingConnection = false
             } else {
                 activeScreenStreamTypes.remove(type)
             }
@@ -4351,13 +4369,9 @@ class CarPlayHostActivity : ComponentActivity() {
         mainHandler.removeCallbacks(showStageElapsedNotice)
         val safe = DiagnosticRedactor.redact(message)
         val visibleMessage = safe ?: connectionUiText("连接状态暂不可显示", "Connection status unavailable")
-        stageStatusView?.text = visibleMessage
-        wideStageView?.text = visibleMessage
-        wideGuidanceView?.text = connectionUiText(
-            "当前没有新的结构化阶段信息。请查看右侧日志中的明确错误或进度。",
-            "No new structured stage is available. Check the explicit progress or errors in the log.",
-        )
-        wideElapsedView?.visibility = View.GONE
+        connectionStageView?.text = visibleMessage
+        connectionGuidanceView?.text = defaultConnectionGuidance()
+        connectionElapsedView?.visibility = View.GONE
         updateDebugOverlays()
     }
 
@@ -4368,36 +4382,31 @@ class CarPlayHostActivity : ComponentActivity() {
         }
         val changed = currentConnectionStatus != status
         currentConnectionStatus = status
-        stageStatusView?.text = title
-        wideStageView?.text = title
-        wideGuidanceView?.text = guidanceFor(status)
+        connectionStageView?.text = title
+        connectionGuidanceView?.text = guidanceFor(status)
 
         if (changed) {
             currentStageStartedAtMillis = System.currentTimeMillis()
             mainHandler.removeCallbacks(showStageElapsedNotice)
-            wideElapsedView?.visibility = View.GONE
+            connectionElapsedView?.visibility = View.GONE
             mainHandler.postDelayed(showStageElapsedNotice, STAGE_STALL_NOTICE_MILLIS)
             when (status) {
                 is CarPlayStatus.Failed -> {
-                    recordExplicitFailure(status.message)
+                    recordExplicitFailure(status)
                     appendLog("Connection failed: ${status.message}")
                 }
                 else -> {
                     if (isConfirmedConnectionMilestone(status)) {
                         lastConfirmedStage = title
-                        wideConfirmedStageView?.text = connectionUiText(
+                        connectionConfirmedStageView?.text = connectionUiText(
                             "最近确认节点：$title",
                             "Last confirmed milestone: $title",
                         )
-                        wideConfirmedStageView?.visibility = View.VISIBLE
+                        connectionConfirmedStageView?.visibility = View.VISIBLE
                     }
                     appendLog(connectionUiText("阶段：$title", "Stage: $title"))
                 }
             }
-        }
-        if (lastFailureMessage != null && status !is CarPlayStatus.Failed) {
-            wideFailureView?.text = failureCardText(lastFailureMessage!!, lastFailureAdvice.orEmpty())
-            wideFailureView?.visibility = View.VISIBLE
         }
         updateDebugOverlays()
     }
@@ -4439,19 +4448,19 @@ class CarPlayHostActivity : ComponentActivity() {
         if (status.message.startsWith("Manual hotspot SSID does not match")) {
             return connectionUiText("保存的热点名称与车机配置不一致", "Saved hotspot name differs from the car configuration")
         }
-        val mapped = AndroidBluetoothFailureCopy.forControllerMessage(this, status.message) ?: status.message
-        return DiagnosticRedactor.redact(mapped)
-            ?: connectionUiText("错误详情已隐藏", "Error details were hidden")
+        val mapped = AndroidBluetoothFailureCopy.forControllerMessage(this, status.message)
+        if (mapped != null) return mapped
+        return if (RuntimeDiagnostics.enabled()) {
+            DiagnosticRedactor.redact(status.message) ?: getString(R.string.diplay_connection_failed)
+        } else getString(R.string.diplay_connection_failed)
     }
 
-    private fun recordExplicitFailure(message: String) {
-        val safe = DiagnosticRedactor.redact(message)
-            ?: connectionUiText("错误详情已隐藏", "Error details were hidden")
+    private fun recordExplicitFailure(status: CarPlayStatus.Failed) {
+        val safe = failureText(status)
         lastFailureMessage = safe
-        val advice = ConnectionRecoveryAdvice.forFailure(message, geelyBluetoothEnabled)
+        val advice = ConnectionRecoveryAdvice.forFailure(status.message, geelyBluetoothEnabled)
         lastFailureAdvice = connectionUiText(advice.chinese, advice.english)
-        wideFailureView?.text = failureCardText(safe, lastFailureAdvice.orEmpty())
-        wideFailureView?.visibility = View.VISIBLE
+        connectionFailureView?.text = failureCardText(safe, lastFailureAdvice.orEmpty())
     }
 
     private fun isConfirmedConnectionMilestone(status: CarPlayStatus): Boolean = when (status) {
@@ -4473,12 +4482,12 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun guidanceFor(status: CarPlayStatus): String = when (status) {
         CarPlayStatus.DiscoveringMfi -> connectionUiText(
-            "正在查找 MFi 认证设备。保持当前连接方式并查看右侧日志。",
-            "Looking for the MFi authentication device. Keep the current connection in place and check the log.",
+            "正在查找 MFi 认证设备。请保持当前连接。",
+            "Looking for the MFi authentication device. Keep the current connection in place.",
         )
         CarPlayStatus.WaitingForMfi -> connectionUiText(
-            "仍在等待 MFi 协处理器。检查其连接与供电，再查看最新日志。",
-            "Still waiting for the MFi coprocessor. Check its connection and power, then review the latest log.",
+            "仍在等待 MFi 协处理器。请检查其连接与供电。",
+            "Still waiting for the MFi coprocessor. Check its connection and power.",
         )
         CarPlayStatus.RequestingMfiPermission -> connectionUiText(
             "请在系统弹窗中允许访问 USB 设备。",
@@ -4489,8 +4498,8 @@ class CarPlayHostActivity : ComponentActivity() {
             "The MFi authentication device is ready. Connection setup is continuing.",
         )
         CarPlayStatus.StartingHotspot -> connectionUiText(
-            "正在启动无线热点。请查看右侧日志确认后续阶段。",
-            "Starting the wireless hotspot. Check the log for the next confirmed stage.",
+            "热点就绪后将继续连接 iPhone。",
+            "Connection to your iPhone will continue when the hotspot is ready.",
         )
         is CarPlayStatus.HotspotReady -> connectionUiText(
             "热点已就绪，正在等待 iPhone 建立无线连接。",
@@ -4549,16 +4558,16 @@ class CarPlayHostActivity : ComponentActivity() {
             "Selecting the iPhone USB configuration. Keep it connected.",
         )
         CarPlayStatus.OpeningDataPaths -> connectionUiText(
-            "正在打开 USB 数据通道。请保持连接并查看日志。",
-            "Opening USB data paths. Keep the connection in place and check the log.",
+            "请保持 USB 连接，等待数据通道打开。",
+            "Keep the USB cable connected while the data paths open.",
         )
         CarPlayStatus.Pairing -> connectionUiText(
             "正在与 iPhone 配对。按 iPhone 上显示的信任提示操作。",
             "Pairing with the iPhone. Respond to any trust prompt shown on the phone.",
         )
         CarPlayStatus.ConnectingControl -> connectionUiText(
-            "正在建立 iAP2 控制连接。请保持 iPhone 解锁并查看后续日志。",
-            "Establishing the iAP2 control connection. Keep the iPhone unlocked and check the next log entries.",
+            "请保持 iPhone 解锁，等待控制连接建立。",
+            "Keep the iPhone unlocked while the control connection opens.",
         )
         CarPlayStatus.AttachingNetwork -> connectionUiText(
             "控制连接已建立，正在准备网络通道。",
@@ -4569,12 +4578,18 @@ class CarPlayHostActivity : ComponentActivity() {
             "Connecting iPhone video and audio. A data-path or connection timeout will trigger a retry.",
         )
         CarPlayStatus.ControlEnded -> connectionUiText(
-            "控制连接已结束。请查看右侧日志中的后续状态。",
-            "The control connection ended. Check the subsequent state in the log.",
+            "请保持 iPhone 在附近，等待 DiPlay 恢复连接。",
+            "Keep the iPhone nearby while DiPlay restores the connection.",
         )
         is CarPlayStatus.Failed -> {
-            val advice = ConnectionRecoveryAdvice.forFailure(status.message, geelyBluetoothEnabled)
-            connectionUiText(advice.chinese, advice.english)
+            when (hotspotRecovery()) {
+                HotspotRecovery.OPEN_SETTINGS -> getString(R.string.diplay_car_hotspot_off_hint)
+                HotspotRecovery.CONFIGURE -> getString(R.string.diplay_configure_hotspot_hint)
+                null -> {
+                    val advice = ConnectionRecoveryAdvice.forFailure(status.message, geelyBluetoothEnabled)
+                    connectionUiText(advice.chinese, advice.english)
+                }
+            }
         }
     }
 
@@ -4592,7 +4607,7 @@ class CarPlayHostActivity : ComponentActivity() {
             onCarHome = { startActivity(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_HOME)) },
         ))
         val connection = DiPlayConnectionView(this) { wireless ->
-            if (wireless) showDiPlayHome(offerWirelessSwitch = true)
+            if (wireless) showDiPlayHome(offerTransport = true)
         }.apply {
             val inset = diPlayDp(if (diPlayLayoutWidth() >= 620) 28 else 12)
             setPadding(inset, diPlayDp(18), inset, diPlayDp(22))
@@ -4627,6 +4642,21 @@ class CarPlayHostActivity : ComponentActivity() {
 
     private fun updateDebugOverlays() {
         val wide = isWideConnectionSurface()
+        updateConnectionTitle()
+        connectionFailureView?.visibility = if (RuntimeDiagnostics.enabled() && lastFailureMessage != null &&
+            currentConnectionStatus !is CarPlayStatus.Failed) View.VISIBLE else View.GONE
+        connectionRail?.let { rail ->
+            val showRail = diPlayLayoutWidth() >= 860 && connectionLogPanel == null
+            rail.visibility = if (showRail) View.VISIBLE else View.GONE
+            if (showRail) rail.show(wirelessEnabled)
+        }
+        connectionTransportLabelView?.let { label ->
+            val updated = connectionTransportLabel()
+            if (label.text != updated) {
+                label.text = updated
+                connectionTransportView?.setImageResource(connectionTransportIcon())
+            }
+        }
         val mainVideoActive = SCREEN_TYPE_MAIN in activeScreenStreamTypes
         updateFpsOverlay()
         val waitingForUsb = !wirelessEnabled && !mainVideoActive &&
@@ -4635,17 +4665,17 @@ class CarPlayHostActivity : ComponentActivity() {
         val useWaitingPanel = waitingForUsb && !showUsbWaitDetails && lastFailureMessage == null &&
             !shuttingDown.get()
         val logsWereVisible = statusScrollView?.visibility == View.VISIBLE
-        val connectionWasVisible = connectionPanel?.visibility == View.VISIBLE ||
-            wideConnectionPanel?.visibility == View.VISIBLE || usbWaitingPanel?.visibility == View.VISIBLE
+        val connectionWasVisible = connectionPanel?.visibility == View.VISIBLE || usbWaitingPanel?.visibility == View.VISIBLE
         usbWaitingPanel?.let { panel ->
             panel.visibility = if (useWaitingPanel) View.VISIBLE else View.GONE
             if (useWaitingPanel) showUsbWaitingPanel(panel)
         }
-        connectionPanel?.visibility =
-            if (!useWaitingPanel && !wide && activeScreenStreamTypes.isEmpty()) View.VISIBLE else View.GONE
-        wideConnectionPanel?.visibility = if (!useWaitingPanel && wide && !mainVideoActive) View.VISIBLE else View.GONE
+        val videoActive = if (wide) mainVideoActive else activeScreenStreamTypes.isNotEmpty()
+        connectionPanel?.visibility = if (!useWaitingPanel && !videoActive) View.VISIBLE else View.GONE
+        connectionLogPanel?.visibility = if (wide) View.VISIBLE else View.GONE
+        connectionCompactReportButton?.visibility = if (wide) View.GONE else View.VISIBLE
         if (connectionWasVisible && connectionPanel?.visibility != View.VISIBLE &&
-            wideConnectionPanel?.visibility != View.VISIBLE && usbWaitingPanel?.visibility != View.VISIBLE) {
+            usbWaitingPanel?.visibility != View.VISIBLE) {
             Log.i("DiPlayUsbTiming", "event=main_connection_panel_hidden " +
                 "elapsedNs=${android.os.SystemClock.elapsedRealtimeNanos()}")
         }
@@ -4768,7 +4798,7 @@ class CarPlayHostActivity : ComponentActivity() {
         "${SimpleDateFormat("HH:mm:ss.SSS", Locale.US).format(Date(nowMillis))}  $message"
 
     private fun refreshKeyDiagnosticsView() {
-        if (wideConnectionPanel?.visibility != View.VISIBLE) return
+        if (connectionPanel?.visibility != View.VISIBLE) return
         keyDiagnosticsView?.apply {
             val summary = keyDiagnostics.summary()
             if (text.toString() != summary) text = summary

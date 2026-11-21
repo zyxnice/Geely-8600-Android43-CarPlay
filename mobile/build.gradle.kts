@@ -65,7 +65,7 @@ android {
             if (geelyWifiLogComparison) isDebuggable = false
             applicationIdSuffix = ".repair1.geely8600"
             versionNameSuffix = when {
-                geelyWifiQuiet -> "-H53-FEEDBACK-HEAD-CAP520-NOLOG-20261119"
+                geelyWifiQuiet -> null
                 geelyWifiLogComparison -> "-H53-FEEDBACK-HEAD-CAP520-20261119"
                 geelyWifiTrial -> "-H53"
                 geelyPerformanceStage == "off" -> "-H53-USB2"
@@ -74,10 +74,10 @@ android {
             manifestPlaceholders["geelyMediaStage"] = geelyPerformanceStage
             manifestPlaceholders["geelyWifiTrial"] = geelyWifiTrial
             if (geelyWifiQuiet) proguardFiles("wifi-quiet.pro")
-            manifestPlaceholders["geelyTestLabel"] = if (geelyWifiTrial) {
-                "DiPlay 8600 1.1"
-            } else {
-                "@string/geely_usb_app_name"
+            manifestPlaceholders["geelyTestLabel"] = when {
+                geelyWifiQuiet -> "DiPlay1.2"
+                geelyWifiTrial -> "DiPlay 8600 1.1"
+                else -> "@string/geely_usb_app_name"
             }
             matchingFallbacks += listOf("debug")
         }
@@ -91,6 +91,23 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
+    }
+}
+
+androidComponents {
+    onVariants(selector().withBuildType("geelyUsb")) { variant ->
+        if (geelyWifiQuiet) {
+            variant.outputs.forEach {
+                it.versionCode.set(32)
+                it.versionName.set("1.2")
+            }
+            // Remove only the packaged data for the unused Picnic implementation.
+            variant.packaging.resources.excludes.addAll(
+                "org/bouncycastle/pqc/crypto/picnic/lowmcL1.bin.properties",
+                "org/bouncycastle/pqc/crypto/picnic/lowmcL3.bin.properties",
+                "org/bouncycastle/pqc/crypto/picnic/lowmcL5.bin.properties",
+            )
+        }
     }
 }
 

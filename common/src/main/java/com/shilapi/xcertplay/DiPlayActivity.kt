@@ -288,9 +288,10 @@ class DiPlayActivity : ComponentActivity() {
             }
         }
         resumePendingConnection()
-        if (intent.getBooleanExtra(EXTRA_OFFER_WIRELESS_SWITCH, false)) {
-            intent.removeExtra(EXTRA_OFFER_WIRELESS_SWITCH)
-            if (CarPlayBackgroundSession.connectionTarget()?.wireless == false) selectTransport(true)
+        if (intent.hasExtra(EXTRA_OFFER_TRANSPORT_SWITCH)) {
+            val wireless = intent.getBooleanExtra(EXTRA_OFFER_TRANSPORT_SWITCH, true)
+            intent.removeExtra(EXTRA_OFFER_TRANSPORT_SWITCH)
+            if (CarPlayBackgroundSession.connectionTarget()?.wireless != wireless) selectTransport(wireless)
         }
         if (AirPlayPersistence.loadWirelessHotspotMode(this) == WirelessHotspotMode.MANUAL) {
             submitCarHotspotAction(CarHotspotAction.READ_STATE)
@@ -323,8 +324,8 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun pageContent() = column().apply {
-        val inset = dp(if (diPlayLayoutWidth() >= 620) 28 else 12)
-        setPadding(inset, dp(18), inset, dp(22))
+        val inset = dp(if (diPlayLayoutWidth() >= 1024) 48 else if (diPlayLayoutWidth() >= 620) 28 else 12)
+        setPadding(inset, dp(22), inset, dp(28))
     }
 
     private fun pageScroll(content: View) = ScrollView(this).apply {
@@ -361,7 +362,9 @@ class DiPlayActivity : ComponentActivity() {
                 "connection" -> connectionSetup(content)
                 "about" -> about(content)
                 else -> {
-                    connectionView = DiPlayConnectionView(this, ::selectTransport).also(content::addView)
+                    connectionView = DiPlayConnectionView(this, ::selectTransport).also {
+                        content.addView(it, LinearLayout.LayoutParams(-1, -2, 1f))
+                    }
                 }
             }
             pageScroll(content).also { pageScroll = it }
@@ -421,6 +424,13 @@ class DiPlayActivity : ComponentActivity() {
                             settingsCategory = category
                             render()
                         }
+                    }.apply {
+                        if (wide) {
+                            minimumHeight = dp(75)
+                            textSize = 22f
+                            gravity = Gravity.CENTER_VERTICAL or Gravity.START
+                            setPadding(dp(20), dp(8), dp(20), dp(8))
+                        }
                     },
                     LinearLayout.LayoutParams(0, -2, 1f).apply {
                         if (index > 0) marginStart = dp(8)
@@ -451,7 +461,7 @@ class DiPlayActivity : ComponentActivity() {
                 setPadding(dp(28), dp(18), 0, dp(18))
                 clipToPadding = false
             }
-            val sidebarWidth = (configuration.screenWidthDp * .24f).toInt().coerceIn(195, 292)
+            val sidebarWidth = (configuration.screenWidthDp * .24f).toInt().coerceIn(195, 460)
             addView(sidebar, LinearLayout.LayoutParams(dp(sidebarWidth), -1))
             addView(scroll, LinearLayout.LayoutParams(0, -1, 1f))
         }
@@ -1593,12 +1603,15 @@ class DiPlayActivity : ComponentActivity() {
         val list = column().apply { setPadding(dp(20), dp(10), dp(20), dp(10)) }
         if (switching) list.addView(label(getString(R.string.diplay_switch_phone_hint), 16, TEXT)
             .apply { setPadding(0, 0, 0, dp(12)) })
-        val dialog = AlertDialog.Builder(this)
-            .setTitle(R.string.choose_your_iphone)
-            .setView(pageScroll(list))
-            .setNegativeButton(R.string.cancel, null)
-            .setNeutralButton(R.string.pair_another) { _, _ -> showPairingHelp(geelyBluetooth) }
-            .create()
+        val inline = connectionView?.takeIf { diPlayLayoutWidth() >= 860 }
+        val dialog = if (inline == null) {
+            AlertDialog.Builder(this)
+                .setTitle(R.string.choose_your_iphone)
+                .setView(pageScroll(list))
+                .setNegativeButton(R.string.cancel, null)
+                .setNeutralButton(R.string.pair_another) { _, _ -> showPairingHelp(geelyBluetooth) }
+                .create()
+        } else null
         for (phone in entries) {
             val name = if ((counts[phone.name] ?: 0) > 1) {
                 "${phone.name} · ${phone.address.takeLast(5)}"
@@ -1613,7 +1626,8 @@ class DiPlayActivity : ComponentActivity() {
             }
             val style = if (current || saved) DiPlayButtonStyle.SELECTED else DiPlayButtonStyle.NORMAL
             val button = diPlayButton(title, style) {
-                dialog.dismiss()
+                dialog?.dismiss()
+                if (inline != null) render()
                 if (CarPlayBackgroundSession.isStopping() ||
                     AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this) != geelyBluetooth) return@diPlayButton
                 DiPlayPreferences.savePhone(this, phone.address, phone.name, geelyBluetooth)
@@ -1624,10 +1638,24 @@ class DiPlayActivity : ComponentActivity() {
                         openProjection(true)
                     } else connect(true)
                 }
-            }.apply { gravity = Gravity.START or Gravity.CENTER_VERTICAL }
+            }.apply {
+                gravity = Gravity.START or Gravity.CENTER_VERTICAL
+                if (inline != null) {
+                    textSize = 23f
+                    minimumHeight = dp(68)
+                }
+            }
             list.addView(button, LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) })
         }
-        dialog.show()
+        if (inline == null) dialog?.show()
+        else inline.showPhonePicker(
+            pageScroll(list),
+            onCancel = ::render,
+            onPair = {
+                render()
+                showPairingHelp(geelyBluetooth)
+            },
+        )
     }
 
     private fun showGeelyPhoneLookupFailure(error: Throwable) {
@@ -1819,9 +1847,16 @@ class DiPlayActivity : ComponentActivity() {
     }
 
     private fun handleWirelessRecovery() {
-        if (page != "wireless-recovery") return
-        page = "home"; render()
-        confirmWirelessReset()
+        when (page) {
+            "wireless-recovery" -> {
+                openPage("home")
+                confirmWirelessReset()
+            }
+            "car-hotspot-settings" -> {
+                openPage("connection")
+                openCarWifiSettings()
+            }
+        }
     }
 
     private fun confirmWirelessReset() {
@@ -1903,6 +1938,7 @@ class DiPlayActivity : ComponentActivity() {
     private fun refreshStatus() {
         refreshGeelyHudStatus()
         val view = connectionView ?: return
+        if (view.phonePickerVisible) return
         val target = CarPlayBackgroundSession.connectionTarget()
         val phase = when {
             CarPlayBackgroundSession.isStopping() -> HomePhase.DISCONNECTING
@@ -1915,19 +1951,24 @@ class DiPlayActivity : ComponentActivity() {
         val useGeelyBluetooth = AirPlayPersistence.loadGeelyBluetoothConnectionEnabled(this)
         val preferredPhone = DiPlayPreferences.phoneName(this)
             .takeIf { DiPlayPreferences.phoneSelectedForTransport(this, useGeelyBluetooth) }
-        val hotspotOff = phase == HomePhase.READY && !usesGeelyFactoryHotspot() && carHotspotOff()
+        val preferredWireless = AirPlayPersistence.loadWirelessEnabled(this)
+        val hotspotOff = phase == HomePhase.READY && preferredWireless && !usesGeelyFactoryHotspot() && carHotspotOff()
         val guidance = when (phase) {
             HomePhase.CONNECTED -> target?.wireless?.let {
                 getString(if (it) R.string.diplay_via_wifi else R.string.diplay_via_usb)
             }
             HomePhase.FAILED -> setupError
+            HomePhase.CONNECTING -> target?.wireless?.let {
+                getString(if (it) R.string.keep_your_iphone_nearby_with_bluetooth_and_wi_fi_on_allow
+                    else R.string.use_a_usb_data_cable_and_unlock_your_iphone_allow_trust_an)
+            }
             HomePhase.READY -> if (hotspotOff) {
-                getString(R.string.msg_car_hotspot_off, AirPlayPersistence.loadManualHotspotSsid(this))
+                getString(R.string.diplay_car_hotspot_off_hint)
             } else getString(R.string.diplay_select_mode_hint)
             else -> null
         }
         val state = HomeConnectionState(
-            phase, target?.wireless ?: pendingConnection,
+            phase, target?.wireless ?: pendingConnection ?: preferredWireless.takeIf { phase == HomePhase.READY },
             if (target != null) target.phoneName else preferredPhone, guidance, hotspotOff,
             queued = pendingConnection != null,
         )
@@ -1956,15 +1997,22 @@ class DiPlayActivity : ComponentActivity() {
                     }
                     add(DiPlayConnectionView.Action(R.string.disconnect, DiPlayButtonStyle.DISCONNECT, ::disconnectFromHome))
                 }
-                HomePhase.READY, HomePhase.FAILED ->
+                HomePhase.READY -> {
+                    if (state.hotspotOff) {
+                        add(DiPlayConnectionView.Action(R.string.open_car_hotspot_settings, DiPlayButtonStyle.PRIMARY, ::openCarWifiSettings))
+                    } else {
+                        add(DiPlayConnectionView.Action(R.string.diplay_connect_action, DiPlayButtonStyle.PRIMARY) {
+                            connect(preferredWireless)
+                        })
+                    }
+                    add(DiPlayConnectionView.Action(R.string.choose_iphone, click = ::chooseHomePhone))
+                }
+                HomePhase.FAILED ->
                     add(DiPlayConnectionView.Action(R.string.choose_iphone, click = ::chooseHomePhone))
                 HomePhase.PREPARING -> if (state.queued) {
                     add(DiPlayConnectionView.Action(R.string.cancel, click = ::disconnectFromHome))
                 } else Unit
                 HomePhase.DISCONNECTING -> Unit
-            }
-            if (state.hotspotOff) {
-                add(DiPlayConnectionView.Action(R.string.open_car_hotspot_settings, click = ::openCarWifiSettings))
             }
         }
         val tone = when {
@@ -1972,7 +2020,13 @@ class DiPlayActivity : ComponentActivity() {
             phase == HomePhase.FAILED || hotspotOff -> WARNING
             else -> MUTED
         }
-        val title = state.phone ?: if (phase == HomePhase.CONNECTED) "iPhone" else null
+        val title = when {
+            hotspotOff -> getString(R.string.diplay_car_hotspot_off)
+            state.phone != null -> state.phone
+            phase == HomePhase.CONNECTED -> "iPhone"
+            phase == HomePhase.READY -> getString(R.string.connect_phone)
+            else -> null
+        }
         view.show(state.wireless, status, title, state.guidance, tone, actions,
             transportEnabled = phase != HomePhase.FAILED && phase != HomePhase.DISCONNECTING)
     }

@@ -1,6 +1,10 @@
 # DiPlay · 吉利星越 2019 款 8600 车机专用
 
-> **当前发布：1.1（2026-11-18）。** 在 1.0 基础上合入 H53 无线自动热点、原厂热点信息读取、默认无线自动连接、AAC 处理及播放时序诊断。APK 标识为 `1.1.0-H53-LOG` / versionCode 30。[1.1 下载](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v1.1.0) · [变更、安装与验证范围](docs/RELEASE-1.1-20261118.md)。无线视频声音落后约半秒的问题仍待实车排查，不能将本次发布视为音画同步已修复。
+> **1.2 测试版（2026-11-21）** · `DiPlay1.2`，versionCode `32`，H53 CAP520 NOLOG。宽屏连接页左侧可切换 USB 与 Wi-Fi，并按连接状态提供重试或热点设置入口。CarPlay 画面可开启实时帧率显示，每 0.25 秒刷新一次。无线连接中断后，可在「设置 → 高级与诊断 → 保存诊断报告」导出最近 500 条中断记录。
+>
+> 已在 `C3ALFUS / 06.03.08600.H53.00060` 车机覆盖安装并启动该测试包（APK SHA-256 前 12 位为 `90e6d065abf4`）。此版本的 USB 与 Wi-Fi 长时间连接稳定性、无线音画同步效果仍待实车验证。[1.2 对应源码](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/tree/517f36b356b2426ef8a1b7eefb01d5081aff683c) · [1.2 构建说明](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/blob/release/h53-cap520-nolog/docs/BUILD.md)
+
+> **GitHub 正式发布：1.1（2026-11-18）。** 在 1.0 基础上合入 H53 无线自动热点、原厂热点信息读取、默认无线自动连接、AAC 处理及播放时序诊断。APK 标识为 `1.1.0-H53-LOG` / versionCode 30。[1.1 下载](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v1.1.0) · [变更、安装与验证范围](docs/RELEASE-1.1-20261118.md)。无线视频声音落后约半秒的问题仍待实车排查，不能将本次发布视为音画同步已修复。
 
 > **历史正式版：1.0（2026-11-13）。** 用户当时确认 USB 与 Wi-Fi 两种连接方式的问题均已解决。[1.0 回退包](https://github.com/zyxnice/Geely-8600-Android43-CarPlay/releases/tag/v1.0.0) · [当时的版本身份与验收记录](docs/RELEASE-1.0-20261113.md)。
 
